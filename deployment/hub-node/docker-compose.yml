@@ -1,0 +1,16 @@
+services:
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: local-ai-open-webui
+    restart: unless-stopped
+    ports:
+      - "3000:8080"
+    volumes:
+      - open-webui:/app/backend/data
+    environment:
+      ENABLE_OPENAI_API: "true"
+      OPENAI_API_BASE_URL: "${OPENAI_API_BASE_URL:-http://host.docker.internal:8080/v1}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-local-dev-key}"
+
+volumes:
+  open-webui:

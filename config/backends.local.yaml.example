@@ -1,0 +1,30 @@
+backends:
+  pc-rtx2070:
+    role: local_fast
+    runtime: ollama
+    endpoint: http://pc-ai.local:11434
+    openai_endpoint: http://pc-ai.local:11434/v1
+    enabled: true
+    inference_enabled: true
+    health_path: /api/tags
+    notes: Fast local CUDA node. Best for 7B/8B local models.
+
+  macbook-m4pro:
+    role: local_quality
+    runtime: lmstudio
+    endpoint: http://Jamess-MacBook-Pro-2.local:1234
+    openai_endpoint: http://Jamess-MacBook-Pro-2.local:1234/v1
+    enabled: true
+    inference_enabled: true
+    health_path: /v1/models
+    notes: Quality local Metal node. Best for 14B-ish quantized models.
+
+  old-macbook:
+    role: utility_node
+    runtime: utility
+    endpoint: null
+    openai_endpoint: null
+    enabled: true
+    inference_enabled: false
+    health_path: null
+    notes: Utility/admin/RAG/dashboard node only. Must not be selected for inference.

@@ -1,0 +1,11 @@
+# Example route overrides if you want to explicitly map a route to a backend
+# This is usually optional as the gateway auto-routes by role.
+
+routes:
+  local-fast:
+    backend: pc-rtx2070
+    description: "Fast local coding models"
+
+  local-quality:
+    backend: macbook-m4pro
+    description: "High-quality reasoning models"

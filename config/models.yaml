@@ -1,0 +1,24 @@
+models:
+  local-fast:
+    route: local-fast
+    model: qwen2.5-coder:7b
+    provider: ollama
+    purpose: fast local coding/chat
+
+  local-quality:
+    route: local-quality
+    model: qwen-coder-14b-q4
+    provider: lmstudio
+    purpose: higher quality local reasoning/coding
+
+  private-docs:
+    route: private-docs
+    model: qwen-coder-14b-q4
+    provider: lmstudio
+    purpose: local-only private document work
+
+  cloud-best:
+    route: cloud-best
+    model: null
+    provider: null
+    purpose: disabled until explicitly configured

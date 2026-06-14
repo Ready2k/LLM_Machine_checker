@@ -22,3 +22,24 @@ env/
 *.njsproj
 *.sln
 *.sw?
+
+# Environment and Secrets
+.env
+.env.local
+secrets/
+data/private/
+data/telemetry/
+
+# Local configuration overrides
+config/*.local.yaml
+config/*.local.json
+
+# Node
+node_modules/
+
+# Python caches
+.pytest_cache/
+llm-bench-env/
+
+# Runtime files
+.gateway.pid

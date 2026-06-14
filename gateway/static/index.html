@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Local AI Fabric — Admin dashboard for managing a federated local AI inference fleet. Monitor machine health, routing, benchmarks, and runtime readiness.">
+  <meta name="theme-color" content="#0a0e1a">
+  <title>Local AI Fabric — Dashboard</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+</head>
+<body>
+
+<main class="dashboard" id="app">
+
+  <!-- ============ HEADER ============ -->
+  <header class="header fade-in" id="header">
+    <div class="header-brand">
+      <span class="status-dot status-dot--healthy" id="system-status-dot" title="System healthy"></span>
+      <h1>Local AI Fabric</h1>
+      <span class="version-tag">v0.1.0</span>
+    </div>
+    <div class="header-controls">
+      <span class="refresh-info" id="last-refresh">—</span>
+      <div class="toggle-wrap">
+        <label class="toggle-switch" title="Auto-refresh every 30s">
+          <input type="checkbox" id="auto-refresh-toggle">
+          <span class="toggle-slider"></span>
+        </label>
+        <span>Auto-refresh</span>
+      </div>
+      <button class="btn" id="refresh-btn" title="Refresh now">🔄 Refresh</button>
+    </div>
+  </header>
+
+  <!-- ============ FLEET OVERVIEW ============ -->
+  <section class="fade-in" id="fleet-section">
+    <h2 class="section-title"><span class="icon">🖥</span> Fleet Overview</h2>
+    <div class="fleet-grid" id="fleet-grid">
+      <!-- Machine cards rendered by JS -->
+      <div class="glass-card-static empty-state" id="fleet-loading">
+        <div class="skeleton skeleton--line" style="width:60%;margin:0 auto"></div>
+        <div class="skeleton skeleton--line" style="width:40%;margin:0 auto"></div>
+        <div class="skeleton skeleton--line" style="width:50%;margin:0 auto"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ THIS MACHINE ============ -->
+  <section class="fade-in" id="profile-section">
+    <h2 class="section-title"><span class="icon">📍</span> This Machine</h2>
+    <div class="glass-card-static this-machine" id="profile-panel">
+      <div class="empty-state" id="profile-loading">
+        <div class="spinner" style="margin:0 auto 0.5rem"></div>
+        <p class="text-muted">Loading profile…</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ ROUTING MAP ============ -->
+  <section class="fade-in" id="routing-section">
+    <h2 class="section-title"><span class="icon">🔀</span> Routing Map</h2>
+    <div class="route-cards-grid" id="routing-grid">
+      <div class="glass-card-static empty-state" id="routing-loading">
+        <div class="skeleton skeleton--line" style="width:50%;margin:0 auto"></div>
+        <div class="skeleton skeleton--line" style="width:35%;margin:0 auto"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ ARCHITECTURE DIAGRAM ============ -->
+  <section class="fade-in" id="arch-section">
+    <h2 class="section-title"><span class="icon">🏗</span> Architecture</h2>
+    <div class="glass-card-static" id="arch-panel">
+      <!-- Rendered by JS -->
+    </div>
+  </section>
+
+  <!-- ============ FOOTER ============ -->
+  <footer class="footer fade-in">
+    <p>Local AI Fabric v0.1.0 · <a href="docs/LOCAL_AI_FABRIC_SPEC.md">Spec</a> · <a href="docs/WEB_DASHBOARD_IMPLEMENTATION_PLAN.md">Plan</a></p>
+    <p id="footer-refresh" class="text-dim" style="margin-top:0.25rem">—</p>
+  </footer>
+
+</main>
+
+<script src="/static/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+routes:
+  local-fast:
+    primary: pc-rtx2070
+    fallback: macbook-m4pro
+    cloud_fallback: false
+    privacy_allowed:
+      - public
+      - personal
+      - confidential
+
+  local-quality:
+    primary: macbook-m4pro
+    fallback: pc-rtx2070
+    cloud_fallback: false
+    privacy_allowed:
+      - public
+      - personal
+      - confidential
+
+  private-docs:
+    primary: macbook-m4pro
+    fallback: pc-rtx2070
+    cloud_fallback: false
+    privacy_allowed:
+      - personal
+      - confidential
+      - restricted
+
+  cloud-best:
+    primary: null
+    fallback: null
+    cloud_fallback: true
+    enabled: false
+    status: not_configured
+    privacy_allowed:
+      - public

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import argparse
 import json
 import platform
 import shutil
@@ -440,7 +441,7 @@ def get_recommendation_details(ram_gb, has_nvidia, is_apple_silicon):
             return "Qwen Coder 1.5B Q4_K_M", 1.2, "poor", "no"
 
 
-def main():
+def main(output_json=False):
     hostname = platform.node()
     os_name = f"{platform.system()} {platform.release()}"
     arch = platform.machine()
@@ -543,14 +544,22 @@ def main():
         risk=risk
     )
 
-    # Print summary
-    print(f"Compatible: {compatible}")
-    print(f"Recommended model: {rec_model}")
-    print(f"Expected performance: {expected_perf}")
-    print(f"Measured tokens/sec: {est_tokens_sec if est_tokens_sec is not None else 'N/A'}")
-    print(f"Risk: {risk}")
+    # Output
+    if output_json:
+        print(json.dumps(asdict(profile), indent=2, default=str))
+    else:
+        print(f"Compatible: {compatible}")
+        print(f"Recommended model: {rec_model}")
+        print(f"Expected performance: {expected_perf}")
+        print(f"Measured tokens/sec: {est_tokens_sec if est_tokens_sec is not None else 'N/A'}")
+        print(f"Risk: {risk}")
+
+    return profile
 
 
 if __name__ == "__main__":
-    main()
-
+    parser = argparse.ArgumentParser(description="Profile machine for local LLM readiness")
+    parser.add_argument("--json", action="store_true", dest="json_output",
+                        help="Output full profile as JSON to stdout")
+    args = parser.parse_args()
+    main(output_json=args.json_output)
