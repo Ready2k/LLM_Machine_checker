@@ -6,6 +6,7 @@ import * as db from './db.js';
 import { uuid, SCHEMA_VERSION } from './db.js';
 import { initHistory, refreshSidebar, showUnavailable } from './history.js';
 import { initSettings } from './settings.js';
+import { initMemory, buildInjection } from './memory.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 function esc(s) {
@@ -323,9 +324,15 @@ async function send() {
   refreshSidebar();
 
   // Build request body BEFORE adding the empty assistant placeholder.
-  const reqMessages = state.messages
+  // Memory is injected as a system message that is re-derived per request and
+  // never persisted into history.
+  const convMessages = state.messages
     .filter(m => m.role === 'user' || (m.role === 'assistant' && m.content))
     .map(m => ({ role: m.role, content: m.content }));
+  const memBlock = await buildInjection();
+  const reqMessages = memBlock
+    ? [{ role: 'system', content: memBlock }, ...convMessages]
+    : convMessages;
 
   const thinking = addTypingDots();
   state.streaming = true;
@@ -585,6 +592,8 @@ async function init() {
     getPersistence: () => state.persistence,
     onDataChanged: onDataChanged,
   });
+
+  initMemory();
 
   try {
     await db.openDB();

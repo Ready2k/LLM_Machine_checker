@@ -75,10 +75,41 @@ html, body { height: 100%; background: var(--bg); color: var(--text);
 .sb-empty, .sb-banner { color: var(--dim); font-size: 12px; padding: 14px; text-align: center; }
 .sb-banner { color: #caa46a; line-height: 1.5; }
 
-.sb-foot { padding: 8px; border-top: 1px solid var(--border); }
-.sb-foot-btn { width: 100%; background: none; border: 1px solid transparent; color: var(--dim);
-  padding: 7px; border-radius: 6px; cursor: pointer; font-size: 13px; text-align: left; transition: all .15s; }
+.sb-foot { padding: 8px; border-top: 1px solid var(--border); display: flex; gap: 6px; }
+.sb-foot-btn { flex: 1; background: none; border: 1px solid transparent; color: var(--dim);
+  padding: 7px; border-radius: 6px; cursor: pointer; font-size: 12px; text-align: center; transition: all .15s; }
 .sb-foot-btn:hover { background: var(--surface2); color: var(--text); }
+
+/* Memory panel */
+#memory-modal { display: none; position: fixed; inset: 0; z-index: 300; }
+#memory-modal.open { display: block; }
+#memory-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.55); }
+.mem-toggle { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; margin-bottom: 8px; }
+.mem-toggle input { width: 15px; height: 15px; cursor: pointer; }
+.mem-add-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.mem-add-row input[type="text"] { flex: 1; min-width: 140px; background: var(--surface2);
+  border: 1px solid var(--border); color: var(--text); padding: 8px 10px; border-radius: 8px; font-size: 13px; }
+.mem-add-row input[type="text"]:focus { outline: none; border-color: var(--accent); }
+#mem-add-cat { background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+  padding: 8px; border-radius: 8px; font-size: 12px; cursor: pointer; }
+.mem-preview { display: none; white-space: pre-wrap; background: #111; border: 1px solid var(--border);
+  border-radius: 6px; padding: 10px; font-size: 12px; color: var(--dim); margin: 10px 0;
+  max-height: 180px; overflow-y: auto; font-family: 'SF Mono','Fira Code',monospace; }
+#mem-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.mem-empty { color: var(--dim); font-size: 12px; padding: 10px 0; }
+.mem-item { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
+.mem-top { display: flex; align-items: flex-start; gap: 9px; }
+.mem-top input { margin-top: 3px; width: 15px; height: 15px; cursor: pointer; flex-shrink: 0; }
+.mem-text { font-size: 13px; line-height: 1.45; word-break: break-word; }
+.mem-meta { display: flex; align-items: center; gap: 6px; margin-top: 8px; padding-left: 24px; flex-wrap: wrap; }
+.mem-badge { font-size: 10px; text-transform: uppercase; letter-spacing: .03em;
+  background: var(--bg); border: 1px solid var(--border); color: var(--dim); padding: 1px 6px; border-radius: 4px; }
+.mem-act { background: none; border: none; color: var(--dim); cursor: pointer; font-size: 12px;
+  padding: 2px 4px; border-radius: 4px; margin-left: auto; }
+.mem-act + .mem-act { margin-left: 0; }
+.mem-act:hover { color: var(--text); background: var(--border); }
+.mem-edit { width: 100%; background: var(--bg); border: 1px solid var(--accent); color: var(--text);
+  font-size: 13px; padding: 5px 6px; border-radius: 4px; }
 
 /* Settings modal */
 #settings-modal { display: none; position: fixed; inset: 0; z-index: 300; }
@@ -280,6 +311,7 @@ footer { border-top: 1px solid var(--border); padding: 10px 16px 14px;
     </div>
     <div id="conv-list"></div>
     <div class="sb-foot">
+      <button class="sb-foot-btn" data-action="open-memory" title="Memory">🧠 Memory</button>
       <button class="sb-foot-btn" data-action="open-settings" title="Settings &amp; backup">⚙ Settings</button>
     </div>
   </aside>
@@ -370,6 +402,53 @@ footer { border-top: 1px solid var(--border); padding: 10px 16px 14px;
     </div>
 
     <p id="settings-summary" class="settings-summary"></p>
+  </div>
+</div>
+
+<!-- Memory modal -->
+<div id="memory-modal">
+  <div id="memory-backdrop"></div>
+  <div class="settings-card" role="dialog" aria-label="Memory">
+    <div class="settings-head">
+      <h3>🧠 Memory</h3>
+      <button id="memory-close" title="Close" aria-label="Close">×</button>
+    </div>
+
+    <label class="mem-toggle">
+      <input type="checkbox" id="mem-enabled">
+      <span>Use memory in chats</span>
+    </label>
+    <p class="settings-hint">Enabled memories are added as background context to every chat. They never leave your local network and are stored only in this browser.</p>
+
+    <div class="settings-section">
+      <h4>Add a memory</h4>
+      <div class="mem-add-row">
+        <input type="text" id="mem-add-input" placeholder="e.g. I prefer Python and concise answers" autocomplete="off">
+        <select id="mem-add-cat" title="Category">
+          <option value="preference">preference</option>
+          <option value="project">project</option>
+          <option value="constraint">constraint</option>
+          <option value="personal">personal</option>
+          <option value="other" selected>other</option>
+        </select>
+        <button id="mem-add-btn" class="settings-btn">Add</button>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-row" style="justify-content: space-between;">
+        <h4 style="margin:0;">Saved memories</h4>
+        <button id="mem-preview-btn" class="settings-btn">Preview injected context</button>
+      </div>
+      <pre id="mem-preview" class="mem-preview"></pre>
+      <div id="mem-list"></div>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-row">
+        <button id="mem-clear-btn" class="settings-btn danger">Clear all memory</button>
+      </div>
+    </div>
   </div>
 </div>
 
