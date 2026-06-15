@@ -28,10 +28,12 @@ _PRIVACY_SIGNALS = [
 _QUALITY_SIGNALS = [
     r"\bexplain\b", r"\barchitecture\b", r"\breview\b", r"\banalyse\b",
     r"\banalyze\b", r"\bcompare\b", r"\bdesign\b", r"\bwhy\b",
-    r"\bhow does\b", r"\brefactor\b", r"\bsecurity\b", r"\baudit\b",
+    r"\bhow does\b", r"\bhow would\b", r"\bhow should\b", r"\bhow do i\b",
+    r"\brefactor\b", r"\bsecurity\b", r"\baudit\b", r"\btest\b",
     r"\bstrategy\b", r"\btradeoff\b", r"\btrade-off\b", r"\bdiagram\b",
     r"\bdocument\b", r"\bsummarise\b", r"\bsummarize\b", r"\bplan\b",
     r"\bimplications\b", r"\bcritique\b", r"\bevaluate\b", r"\bimplement\b",
+    r"\bdeploy\b", r"\bsetup\b", r"\bconfigure\b",
 ]
 
 _FAST_SIGNALS = [

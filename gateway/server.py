@@ -625,6 +625,23 @@ async def get_v1_models():
             
     return {"object": "list", "data": enabled_models}
 
+@app.post("/v1/embeddings")
+async def embeddings(request: Request):
+    """Pass-through embeddings endpoint — forwards to LM Studio on the quality node."""
+    backends_config = load_backends_config()
+    backend = backends_config.get("backends", {}).get("macbook-m4pro", {})
+    openai_endpoint = backend.get("openai_endpoint", "").rstrip("/")
+    if not openai_endpoint:
+        raise HTTPException(status_code=503, detail="No embeddings backend configured")
+
+    import httpx
+    body = await request.json()
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(f"{openai_endpoint}/embeddings", json=body)
+        resp.raise_for_status()
+        return JSONResponse(content=resp.json())
+
+
 @app.post("/v1/chat/completions")
 async def chat_completions(request: ChatCompletionRequest, x_ai_privacy: Optional[str] = Header(None)):
     pass  # streaming handled below
