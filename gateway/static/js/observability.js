@@ -18,6 +18,10 @@ document.addEventListener("DOMContentLoaded", () => {
             
             if (target === 'traces') {
                 loadTraces();
+            } else if (target === 'overview') {
+                loadOverview();
+            } else if (target === 'logs') {
+                initLiveLogs();
             }
         });
     });
@@ -202,5 +206,59 @@ document.addEventListener("DOMContentLoaded", () => {
     // Initial load
     if (document.querySelector('#obs-tab-traces').classList.contains('active')) {
         loadTraces();
+    } else if (document.querySelector('#obs-tab-overview').classList.contains('active')) {
+        loadOverview();
+    } else if (document.querySelector('#obs-tab-logs').classList.contains('active')) {
+        initLiveLogs();
+    }
+    
+    // --- Overview Logic ---
+    async function loadOverview() {
+        try {
+            const res = await fetch('/api/observability/overview');
+            if (res.ok) {
+                const data = await res.json();
+                document.getElementById('obs-stat-total').innerText = data.total_requests;
+                document.getElementById('obs-stat-success').innerText = data.success_rate_pct + '%';
+                document.getElementById('obs-stat-latency').innerText = data.avg_latency_ms + 'ms';
+                document.getElementById('obs-stat-errors').innerText = data.error_count;
+            }
+        } catch (e) {
+            console.error("Failed to load overview metrics", e);
+        }
+    }
+    
+    // --- Live Logs Logic ---
+    let liveLogsEventSource = null;
+    function initLiveLogs() {
+        if (liveLogsEventSource) return; // already initialized
+        
+        const logsContainer = document.getElementById('obs-live-logs');
+        if (!logsContainer) return;
+        logsContainer.innerHTML = '';
+        
+        liveLogsEventSource = new EventSource('/api/observability/logs/live');
+        
+        liveLogsEventSource.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            const div = document.createElement('div');
+            div.className = `obs-timeline-item ${data.event_type.toLowerCase().includes('error') ? 'error' : ''}`;
+            div.innerHTML = `
+                <div class="obs-timeline-time">${formatTime(data.timestamp)}</div>
+                <div class="obs-timeline-title">[${data.correlation_id.split('-')[0]}] ${data.event_type}</div>
+                <div class="obs-timeline-desc">${data.message}</div>
+            `;
+            logsContainer.prepend(div);
+            
+            // Limit to 200 items to prevent memory bloat
+            while (logsContainer.children.length > 200) {
+                logsContainer.removeChild(logsContainer.lastChild);
+            }
+        };
+        
+        liveLogsEventSource.onerror = (err) => {
+            console.error("EventSource failed:", err);
+            // Will auto-reconnect typically
+        };
     }
 });

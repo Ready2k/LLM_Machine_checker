@@ -36,6 +36,17 @@ def _get_ollama_log_path() -> Optional[str]:
         return os.path.expanduser("~/.ollama/logs/server.log")
     return None
 
+def _get_lmstudio_log_path() -> Optional[str]:
+    if os.name == "nt":
+        local_app_data = os.getenv("LOCALAPPDATA")
+        if local_app_data:
+            return os.path.join(local_app_data, "lm-studio", "log", "lms-server.log")
+    else:
+        # On Mac, LM studio logs are in ~/.cache/lm-studio/log/
+        # There might be multiple, but we'll try lms-server.log or server.log
+        return os.path.expanduser("~/.cache/lm-studio/log/lms-server.log")
+    return None
+
 @app.get("/logs")
 async def get_logs(
     lines: int = Query(100, ge=1, le=5000),
@@ -49,6 +60,8 @@ async def get_logs(
     log_path = None
     if source == "ollama":
         log_path = _get_ollama_log_path()
+    elif source == "lmstudio":
+        log_path = _get_lmstudio_log_path()
         
     if not log_path or not os.path.exists(log_path):
         raise HTTPException(status_code=404, detail=f"Log file not found for source {source}")

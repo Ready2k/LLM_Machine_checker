@@ -7,6 +7,29 @@ from gateway.telemetry.collectors_http import HttpAgentCollector
 
 router = APIRouter(prefix="/api/observability", tags=["observability"])
 
+@router.get("/overview")
+async def get_overview():
+    db = await get_db()
+    if not db:
+        raise HTTPException(status_code=503, detail="Database not ready")
+        
+    async with db.execute("SELECT COUNT(*), SUM(CASE WHEN status='success' THEN 1 ELSE 0 END), SUM(CASE WHEN status='error' THEN 1 ELSE 0 END), AVG(duration_ms) FROM llm_requests") as cursor:
+        row = await cursor.fetchone()
+        
+    total = row[0] or 0
+    successes = row[1] or 0
+    errors = row[2] or 0
+    avg_latency = int(row[3]) if row[3] else 0
+    
+    success_rate = (successes / total * 100) if total > 0 else 100.0
+    
+    return {
+        "total_requests": total,
+        "success_rate_pct": round(success_rate, 1),
+        "error_count": errors,
+        "avg_latency_ms": avg_latency
+    }
+
 @router.get("/traces")
 async def get_traces(limit: int = 100, offset: int = 0):
     db = await get_db()
@@ -98,12 +121,13 @@ async def get_trace_logs(correlation_id: str):
     
     agent_url = b_config.get("agent_url")
     agent_secret = b_config.get("agent_secret")
+    runtime = b_config.get("runtime", "ollama")
     
     if not agent_url or not agent_secret:
         return {"logs": [f"No Node Agent configured for backend '{backend_id}'."]}
         
     try:
-        collector = HttpAgentCollector(agent_url, agent_secret, source="ollama")
+        collector = HttpAgentCollector(agent_url, agent_secret, source=runtime)
         # Grep the remote log for the correlation_id (passed as trace_id to Ollama)
         lines = await collector.get_recent_logs(lines=1000, grep=correlation_id)
         if not lines:
@@ -118,17 +142,50 @@ async def export_audit_bundle():
     if not db:
         raise HTTPException(status_code=503, detail="Database not ready")
         
-    async with db.execute("SELECT * FROM llm_requests ORDER BY timestamp_start DESC LIMIT 1000") as cursor:
+    async with db.execute("SELECT * FROM llm_requests ORDER BY timestamp_start DESC") as cursor:
         rows = await cursor.fetchall()
         columns = [description[0] for description in cursor.description]
-        data = [dict(zip(columns, row)) for row in rows]
         
-    for row in data:
-        row.pop("prompt_hash", None)
-        row.pop("response_hash", None)
-        
+    # very simple export
+    export_data = [dict(zip(columns, row)) for row in rows]
     return Response(
-        content=json.dumps({"version": "1.0", "data": data}, indent=2),
+        content=json.dumps(export_data, indent=2),
         media_type="application/json",
-        headers={"Content-Disposition": "attachment; filename=audit-bundle.json"}
+        headers={"Content-Disposition": "attachment; filename=audit_export.json"}
     )
+
+@router.get("/logs/live")
+async def live_logs():
+    async def event_stream():
+        db = await get_db()
+        if not db:
+            yield "event: error\ndata: Database not ready\n\n"
+            return
+            
+        last_event_id = -1
+        # get max id initially
+        async with db.execute("SELECT MAX(id) FROM llm_events") as cursor:
+            row = await cursor.fetchone()
+            if row and row[0]:
+                last_event_id = row[0]
+                
+        while True:
+            await asyncio.sleep(1.0)
+            async with db.execute(
+                "SELECT id, correlation_id, timestamp, event_type, message FROM llm_events WHERE id > ? ORDER BY id ASC", 
+                (last_event_id,)
+            ) as cursor:
+                new_events = await cursor.fetchall()
+                
+            for ev in new_events:
+                last_event_id = ev[0]
+                data = {
+                    "correlation_id": ev[1],
+                    "timestamp": ev[2],
+                    "event_type": ev[3],
+                    "message": ev[4]
+                }
+                yield f"data: {json.dumps(data)}\n\n"
+                
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(event_stream(), media_type="text/event-stream")

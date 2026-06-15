@@ -19,6 +19,8 @@ backends:
     enabled: true
     inference_enabled: true
     health_path: /v1/models
+    agent_url: http://Jamess-MacBook-Pro-2.local:8081
+    agent_secret: default-node-secret-change-me
     notes: Quality local Metal node. Best for 14B-ish quantized models.
 
   old-macbook:

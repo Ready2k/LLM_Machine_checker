@@ -130,7 +130,24 @@
                 </div>
             </div>
             <div class="obs-tab-content" id="obs-tab-overview">
-                <p class="text-dim">Overview metrics coming soon.</p>
+                <div class="obs-detail-grid" style="margin-top: 1rem;">
+                    <div class="obs-detail-item">
+                        <div class="obs-detail-label">Total Requests</div>
+                        <div class="obs-detail-val" id="obs-stat-total">-</div>
+                    </div>
+                    <div class="obs-detail-item">
+                        <div class="obs-detail-label">Success Rate</div>
+                        <div class="obs-detail-val" id="obs-stat-success">-</div>
+                    </div>
+                    <div class="obs-detail-item">
+                        <div class="obs-detail-label">Avg Latency</div>
+                        <div class="obs-detail-val" id="obs-stat-latency">-</div>
+                    </div>
+                    <div class="obs-detail-item">
+                        <div class="obs-detail-label">Errors</div>
+                        <div class="obs-detail-val text-danger" id="obs-stat-errors">-</div>
+                    </div>
+                </div>
             </div>
             <div class="obs-tab-content" id="obs-tab-logs">
                 <p class="text-dim">Provider log collection coming soon.</p>
