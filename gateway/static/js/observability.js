@@ -143,7 +143,7 @@ document.addEventListener("DOMContentLoaded", () => {
             
             // Now fetch the provider logs asynchronously
             try {
-                const logsRes = await fetch(`/api/observability/traces/${correlationId}/logs`);
+                const logsRes = await fetch(`/api/observability/traces/${id}/logs`);
                 const logsContainer = document.getElementById('obs-provider-logs-container');
                 if (logsRes.ok) {
                     const logsData = await logsRes.json();

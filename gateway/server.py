@@ -11,6 +11,7 @@ Port:         GATEWAY_PORT env var (default 8080).
 import io
 import json
 import os
+from contextlib import asynccontextmanager
 import subprocess
 import sys
 from pathlib import Path
@@ -21,6 +22,8 @@ from fastapi import FastAPI, File, HTTPException, Header, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+import uuid
+import time
 
 from gateway.providers.base import BackendHealth, ModelInfo, ChatCompletionRequest, ChatCompletionResponse, Provider
 from gateway.providers.ollama import OllamaProvider
@@ -29,7 +32,9 @@ from gateway.providers.openai_compatible import OpenAICompatibleProvider
 from gateway.policy.privacy import extract_privacy_level, is_privacy_allowed, can_fallback_to_cloud
 from gateway.policy.routing import resolve_model_to_route, select_backend
 from gateway.policy.autoroute import select_auto_route
-from gateway.telemetry.events import log_routing_decision, _load_telemetry_config
+from gateway.telemetry.events import log_routing_decision, log_llm_event, _load_telemetry_config
+from gateway.telemetry.database import init_db, close_db
+from gateway.api_observability import router as observability_router
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -275,12 +280,21 @@ _cached_profile: Optional[dict] = None
 # FastAPI application
 # ---------------------------------------------------------------------------
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await init_db(PROJECT_ROOT)
+    yield
+    await close_db()
+
 app = FastAPI(
     title="Local AI Fabric Dashboard",
     version="0.1.0",
     docs_url="/api/docs",
     redoc_url=None,
+    lifespan=lifespan,
 )
+
+app.include_router(observability_router)
 
 # Mount static files (CSS, JS, images)
 if STATIC_DIR.exists():
@@ -700,6 +714,8 @@ async def embeddings(request: Request):
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: ChatCompletionRequest, x_ai_privacy: Optional[str] = Header(None)):
+    correlation_id = str(uuid.uuid4())
+    log_llm_event(correlation_id, "request.received", f"Received chat completion request for {request.model}")
     pass  # streaming handled below
 
     models_config = load_models_config()
@@ -722,14 +738,14 @@ async def chat_completions(request: ChatCompletionRequest, x_ai_privacy: Optiona
 
     # 3. Apply Privacy Policy
     if not is_privacy_allowed(privacy_level, route_config):
-        log_routing_decision(route_name, request.model, privacy_level, "none", False, "blocked", "privacy_policy_violation")
+        log_routing_decision(route_name, request.model, privacy_level, "none", False, "blocked", "privacy_policy_violation", correlation_id=correlation_id)
         raise HTTPException(status_code=403, detail={"message": f"Privacy level {privacy_level} not allowed for route {route_name}", "type": "privacy_blocked", "code": "policy_violation"})
 
     # 4. Select Backend
     try:
         backend_id = select_backend(route_config, backends_config)
     except HTTPException as e:
-        log_routing_decision(route_name, request.model, privacy_level, "none", False, "error", "no_backends_available")
+        log_routing_decision(route_name, request.model, privacy_level, "none", False, "error", "no_backends_available", correlation_id=correlation_id)
         raise e
 
     # Determine if fallback was used
@@ -739,7 +755,7 @@ async def chat_completions(request: ChatCompletionRequest, x_ai_privacy: Optiona
     # 5. Forward Request
     provider = get_provider(backend_id, backends_config)
     if not provider:
-        log_routing_decision(route_name, request.model, privacy_level, backend_id, fallback_used, "error", "provider_not_found")
+        log_routing_decision(route_name, request.model, privacy_level, backend_id, fallback_used, "error", "provider_not_found", correlation_id=correlation_id)
         raise HTTPException(status_code=500, detail={"message": f"Provider adapter not found for backend {backend_id}", "type": "config_error", "code": "internal_error"})
 
     target_model_name = request.model
@@ -747,6 +763,7 @@ async def chat_completions(request: ChatCompletionRequest, x_ai_privacy: Optiona
         target_model_name = models_config["models"][request.model].get("model", request.model)
 
     headers = {
+        "x-correlation-id": correlation_id,
         "x-ai-route": route_name,
         "x-ai-backend": backend_id,
         "x-ai-model": target_model_name,
@@ -758,21 +775,38 @@ async def chat_completions(request: ChatCompletionRequest, x_ai_privacy: Optiona
         headers["x-ai-auto-reason"] = auto_reason
 
     if request.stream:
-        log_routing_decision(route_name, request.model, privacy_level, backend_id, fallback_used, "success", error=auto_reason, latency_ms=None, stream=True)
-        stream_gen = provider.chat_completions_stream(request, target_model_name)
-        return StreamingResponse(stream_gen, media_type="text/event-stream", headers=headers)
+        async def stream_wrapper(gen):
+            start_time = time.time()
+            ttft = None
+            try:
+                async for chunk in gen:
+                    if ttft is None:
+                        ttft = int((time.time() - start_time) * 1000)
+                log_llm_event(correlation_id, "provider.stream.first_token", f"First token received in {ttft}ms")
+                yield chunk
+                latency_ms = int((time.time() - start_time) * 1000)
+                log_routing_decision(route_name, request.model, privacy_level, backend_id, fallback_used, "success", error=auto_reason, latency_ms=latency_ms, ttft_ms=ttft, stream=True, correlation_id=correlation_id)
+                log_llm_event(correlation_id, "request.complete", "Stream completed successfully", {"latency_ms": latency_ms})
+            except Exception as e:
+                latency_ms = int((time.time() - start_time) * 1000)
+                log_routing_decision(route_name, request.model, privacy_level, backend_id, fallback_used, "error", str(e), latency_ms=latency_ms, ttft_ms=ttft, stream=True, correlation_id=correlation_id)
+                raise e
 
-    import time
+        stream_gen = provider.chat_completions_stream(request, target_model_name)
+        return StreamingResponse(stream_wrapper(stream_gen), media_type="text/event-stream", headers=headers)
+
+    log_llm_event(correlation_id, "router.selected", f"Selected backend {backend_id}", {"backend": backend_id})
     start_time = time.time()
     try:
         response = await provider.chat_completions(request, target_model_name)
     except Exception as e:
         latency_ms = int((time.time() - start_time) * 1000)
-        log_routing_decision(route_name, request.model, privacy_level, backend_id, fallback_used, "error", str(e), latency_ms=latency_ms)
+        log_routing_decision(route_name, request.model, privacy_level, backend_id, fallback_used, "error", str(e), latency_ms=latency_ms, correlation_id=correlation_id)
         raise HTTPException(status_code=502, detail={"message": f"Backend {backend_id} failed: {str(e)}", "type": "backend_error", "code": "bad_gateway"})
 
     latency_ms = int((time.time() - start_time) * 1000)
-    log_routing_decision(route_name, request.model, privacy_level, backend_id, fallback_used, "success", error=auto_reason, latency_ms=latency_ms)
+    log_routing_decision(route_name, request.model, privacy_level, backend_id, fallback_used, "success", error=auto_reason, latency_ms=latency_ms, correlation_id=correlation_id)
+    log_llm_event(correlation_id, "request.complete", "Request completed successfully", {"latency_ms": latency_ms})
     return JSONResponse(content=response.model_dump(), headers=headers)
 
 class RouteTestRequest(BaseModel):
