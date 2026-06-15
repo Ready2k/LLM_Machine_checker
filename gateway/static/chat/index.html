@@ -75,6 +75,37 @@ html, body { height: 100%; background: var(--bg); color: var(--text);
 .sb-empty, .sb-banner { color: var(--dim); font-size: 12px; padding: 14px; text-align: center; }
 .sb-banner { color: #caa46a; line-height: 1.5; }
 
+.sb-foot { padding: 8px; border-top: 1px solid var(--border); }
+.sb-foot-btn { width: 100%; background: none; border: 1px solid transparent; color: var(--dim);
+  padding: 7px; border-radius: 6px; cursor: pointer; font-size: 13px; text-align: left; transition: all .15s; }
+.sb-foot-btn:hover { background: var(--surface2); color: var(--text); }
+
+/* Settings modal */
+#settings-modal { display: none; position: fixed; inset: 0; z-index: 300; }
+#settings-modal.open { display: block; }
+#settings-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.55); }
+.settings-card { position: relative; max-width: 460px; width: calc(100% - 32px);
+  margin: 8vh auto 0; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 18px 20px 20px; max-height: 84vh; overflow-y: auto; }
+.settings-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.settings-head h3 { font-size: 16px; font-weight: 600; }
+#settings-close { background: none; border: none; color: var(--dim); font-size: 22px;
+  cursor: pointer; line-height: 1; padding: 0 4px; }
+#settings-close:hover { color: var(--text); }
+.settings-status { font-size: 12px; color: var(--dim); margin-bottom: 14px; }
+.settings-section { border-top: 1px solid var(--border); padding-top: 14px; margin-top: 14px; }
+.settings-section h4 { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+.settings-hint { font-size: 12px; color: var(--dim); margin-bottom: 10px; line-height: 1.5; }
+.settings-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.settings-btn { background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+  padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 13px; transition: border-color .15s; }
+.settings-btn:hover { border-color: var(--accent); }
+.settings-btn.danger { color: #ff8888; }
+.settings-btn.danger:hover { border-color: var(--err); }
+#import-mode { background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+  padding: 8px; border-radius: 8px; font-size: 13px; cursor: pointer; }
+.settings-summary { font-size: 12px; color: var(--dim); margin-top: 16px; min-height: 1.2em; }
+
 /* ── Header ── */
 header { display: flex; align-items: center; gap: 10px;
   padding: 10px 16px; border-bottom: 1px solid var(--border);
@@ -248,6 +279,9 @@ footer { border-top: 1px solid var(--border); padding: 10px 16px 14px;
       <input id="sb-search-input" type="text" placeholder="Search chats…" autocomplete="off">
     </div>
     <div id="conv-list"></div>
+    <div class="sb-foot">
+      <button class="sb-foot-btn" data-action="open-settings" title="Settings &amp; backup">⚙ Settings</button>
+    </div>
   </aside>
 
   <div id="app">
@@ -299,6 +333,43 @@ footer { border-top: 1px solid var(--border); padding: 10px 16px 14px;
         </div>
       </div>
     </footer>
+  </div>
+</div>
+
+<!-- Settings & backup modal -->
+<div id="settings-modal">
+  <div id="settings-backdrop"></div>
+  <div class="settings-card" role="dialog" aria-label="Settings and backup">
+    <div class="settings-head">
+      <h3>Settings &amp; backup</h3>
+      <button id="settings-close" title="Close" aria-label="Close">×</button>
+    </div>
+
+    <p id="settings-status" class="settings-status"></p>
+
+    <div class="settings-section">
+      <h4>Backup</h4>
+      <p class="settings-hint">History lives only in this browser. Export a copy to move it to another device or keep it safe.</p>
+      <div class="settings-row">
+        <button id="btn-export" class="settings-btn">Export all</button>
+        <button id="btn-import" class="settings-btn">Import…</button>
+        <select id="import-mode" title="Import mode">
+          <option value="merge">Merge</option>
+          <option value="replace">Replace</option>
+        </select>
+        <input type="file" id="import-file" accept="application/json,.json" hidden>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h4>Danger zone</h4>
+      <div class="settings-row">
+        <button id="btn-clear-history" class="settings-btn danger">Clear history</button>
+        <button id="btn-clear-memory" class="settings-btn danger">Clear memory</button>
+      </div>
+    </div>
+
+    <p id="settings-summary" class="settings-summary"></p>
   </div>
 </div>
 

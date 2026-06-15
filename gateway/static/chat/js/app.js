@@ -5,6 +5,7 @@
 import * as db from './db.js';
 import { uuid, SCHEMA_VERSION } from './db.js';
 import { initHistory, refreshSidebar, showUnavailable } from './history.js';
+import { initSettings } from './settings.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 function esc(s) {
@@ -249,6 +250,18 @@ function newChat() {
   showWelcome();
   refreshSidebar();
   $input.focus();
+}
+
+// Called after a bulk data change (import / clear). Refresh the sidebar and,
+// if the active conversation no longer exists, reset to a new chat.
+async function onDataChanged() {
+  await refreshSidebar();
+  if (state.conv?.id) {
+    try {
+      const still = await db.getConversation(state.conv.id);
+      if (!still) newChat();
+    } catch { /* ignore */ }
+  }
 }
 
 async function resume(id) {
@@ -566,6 +579,11 @@ async function init() {
     onSelect: resume,
     onNew: newChat,
     onActiveDeleted: newChat,
+  });
+
+  initSettings({
+    getPersistence: () => state.persistence,
+    onDataChanged: onDataChanged,
   });
 
   try {

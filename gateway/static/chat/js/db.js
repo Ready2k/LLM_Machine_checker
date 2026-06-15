@@ -94,11 +94,17 @@ export async function listConversations() {
 
 // ── Memories (stores created now; used from Phase 3) ────────────────────────
 export function saveMemory(mem)    { return asPromise(store('memories', 'readwrite').put(mem)); }
+export function getMemory(id)      { return asPromise(store('memories', 'readonly').get(id)); }
 export function deleteMemory(id)   { return asPromise(store('memories', 'readwrite').delete(id)); }
 export async function listMemories() {
   const all = await asPromise(store('memories', 'readonly').getAll());
   return all.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 }
+
+// ── Bulk clear ──────────────────────────────────────────────────────────────
+function clearStore(name) { return asPromise(store(name, 'readwrite').clear()); }
+export function clearConversations() { return clearStore('conversations'); }
+export function clearMemories()      { return clearStore('memories'); }
 
 // Settings
 export async function getSetting(key, fallback) {
@@ -106,3 +112,77 @@ export async function getSetting(key, fallback) {
   return row ? row.value : fallback;
 }
 export function setSetting(key, value) { return asPromise(store('settings', 'readwrite').put({ key, value })); }
+async function listSettings() { return asPromise(store('settings', 'readonly').getAll()); }
+
+// ── Backup: export / import ───────────────────────────────────────────────────
+export const BACKUP_SCHEMA = 'localai-chat-backup';
+
+export async function exportAll() {
+  const [conversations, memories, settings] = await Promise.all([
+    listConversations(), listMemories(), listSettings(),
+  ]);
+  return {
+    schema: BACKUP_SCHEMA,
+    version: SCHEMA_VERSION,
+    exportedAt: new Date().toISOString(),
+    conversations,
+    memories,
+    settings,
+  };
+}
+
+// mode: 'merge' (default) | 'replace'. Returns {imported, skipped, failed}.
+export async function importAll(payload, mode = 'merge') {
+  if (!payload || payload.schema !== BACKUP_SCHEMA) {
+    throw new Error('Not a Local AI Chat backup file.');
+  }
+  if (typeof payload.version !== 'number' || payload.version > SCHEMA_VERSION) {
+    throw new Error(`Unsupported backup version (${payload.version}).`);
+  }
+
+  const summary = { imported: 0, skipped: 0, failed: 0 };
+
+  if (mode === 'replace') {
+    await Promise.all([clearStore('conversations'), clearStore('memories'), clearStore('settings')]);
+  }
+
+  // Conversations
+  for (const c of (Array.isArray(payload.conversations) ? payload.conversations : [])) {
+    if (!c || !c.id || !Array.isArray(c.messages)) { summary.skipped++; continue; }
+    try {
+      if (mode === 'merge') {
+        const existing = await getConversation(c.id);
+        if (existing) {
+          if (JSON.stringify(existing) === JSON.stringify(c)) { summary.skipped++; continue; }
+          c.id = uuid(); // preserve existing; import the differing copy under a fresh id
+        }
+      }
+      await saveConversation(c);
+      summary.imported++;
+    } catch { summary.failed++; }
+  }
+
+  // Memories
+  for (const m of (Array.isArray(payload.memories) ? payload.memories : [])) {
+    if (!m || !m.id || typeof m.text !== 'string') { summary.skipped++; continue; }
+    try {
+      if (mode === 'merge') {
+        const existing = await getMemory(m.id);
+        if (existing) {
+          if (JSON.stringify(existing) === JSON.stringify(m)) { summary.skipped++; continue; }
+          m.id = uuid();
+        }
+      }
+      await saveMemory(m);
+      summary.imported++;
+    } catch { summary.failed++; }
+  }
+
+  // Settings (merge: overwrite by key)
+  for (const s of (Array.isArray(payload.settings) ? payload.settings : [])) {
+    if (!s || !s.key) { summary.skipped++; continue; }
+    try { await setSetting(s.key, s.value); summary.imported++; } catch { summary.failed++; }
+  }
+
+  return summary;
+}
