@@ -65,6 +65,9 @@ class OpenAICompatibleProvider(Provider):
 
     async def chat_completions_stream(self, request: ChatCompletionRequest, mapped_model: str):
         url = f"{self.endpoint}/chat/completions" if self.endpoint.endswith("/v1") else f"{self.endpoint}/v1/chat/completions"
+        if request.metadata and request.metadata.get("correlation_id"):
+            url += f"?trace_id={request.metadata['correlation_id']}"
+        
         payload = {
             "model": mapped_model,
             "messages": request.messages,
@@ -83,6 +86,8 @@ class OpenAICompatibleProvider(Provider):
 
     async def chat_completions(self, request: ChatCompletionRequest, mapped_model: str) -> ChatCompletionResponse:
         url = f"{self.endpoint}/chat/completions" if self.endpoint.endswith("/v1") else f"{self.endpoint}/v1/chat/completions"
+        if request.metadata and request.metadata.get("correlation_id"):
+            url += f"?trace_id={request.metadata['correlation_id']}"
         
         payload = {
             "model": mapped_model,

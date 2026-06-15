@@ -7,6 +7,8 @@ backends:
     enabled: true
     inference_enabled: true
     health_path: /api/tags
+    agent_url: http://Desktop-HomePC.local:8081
+    agent_secret: default-node-secret-change-me
     notes: Fast local CUDA node. Best for 7B/8B local models.
 
   macbook-m4pro:
