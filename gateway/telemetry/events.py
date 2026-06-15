@@ -3,13 +3,17 @@ Telemetry events for the gateway.
 """
 
 import json
-import os
+import logging
 from typing import Any, Dict, Optional
 from datetime import datetime, timezone
 from pathlib import Path
 
+from gateway.telemetry.database import queue_insert
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 CONFIG_DIR = PROJECT_ROOT / "config"
+
+logger = logging.getLogger(__name__)
 
 def _load_telemetry_config() -> dict:
     for ext in [".local.yaml", ".yaml", ".local.json", ".json"]:
@@ -27,6 +31,70 @@ def _load_telemetry_config() -> dict:
                 pass
     return {}
 
+def log_llm_request(
+    correlation_id: str,
+    route: str,
+    backend: str,
+    model: str,
+    privacy: str,
+    status: str,
+    timestamp_start: str,
+    timestamp_end: str,
+    duration_ms: Optional[int],
+    ttft_ms: Optional[int],
+    fallback_used: bool,
+    is_stream: bool,
+    error_code: Optional[str] = None,
+    tokens_in: Optional[int] = None,
+    tokens_out: Optional[int] = None,
+    prompt_hash: Optional[str] = None,
+    response_hash: Optional[str] = None,
+):
+    """Logs the completion of an LLM request to SQLite."""
+    config = _load_telemetry_config()
+    if not config.get("enabled", False):
+        return
+
+    queue_insert("llm_requests", {
+        "correlation_id": correlation_id,
+        "route": route,
+        "backend": backend,
+        "model": model,
+        "privacy": privacy,
+        "status": status,
+        "timestamp_start": timestamp_start,
+        "timestamp_end": timestamp_end,
+        "duration_ms": duration_ms,
+        "time_to_first_token_ms": ttft_ms,
+        "tokens_in": tokens_in,
+        "tokens_out": tokens_out,
+        "fallback_used": fallback_used,
+        "error_code": error_code,
+        "prompt_hash": prompt_hash,
+        "response_hash": response_hash,
+        "is_stream": is_stream
+    })
+
+def log_llm_event(
+    correlation_id: str,
+    event_type: str,
+    message: str,
+    metadata: Optional[Dict[str, Any]] = None
+):
+    """Logs a point-in-time event for a specific request correlation ID."""
+    config = _load_telemetry_config()
+    if not config.get("enabled", False):
+        return
+
+    queue_insert("llm_events", {
+        "correlation_id": correlation_id,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "event_type": event_type,
+        "message": message,
+        "metadata": json.dumps(metadata) if metadata else None
+    })
+
+# Maintain backward compatibility if any old code uses log_routing_decision
 def log_routing_decision(
     route: str, 
     model: str, 
@@ -37,44 +105,22 @@ def log_routing_decision(
     error: str = None,
     ttft_ms: Optional[int] = None,
     latency_ms: Optional[int] = None,
-    stream: bool = False
+    stream: bool = False,
+    correlation_id: str = "unknown"
 ):
-    """Logs a routing decision metadata event."""
-    event = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "event_type": "chat_completion",
-        "route": route,
-        "backend": backend,
-        "model": model,
-        "privacy": privacy,
-        "ttft_ms": ttft_ms,
-        "latency_ms": latency_ms,
-        "fallback_used": fallback_used,
-        "status": status,
-        "error_code": error,
-        "stream": stream
-    }
-    
-    print(f"[TELEMETRY] {event}")
-
-    config = _load_telemetry_config()
-    if not config.get("enabled", False):
-        return
-
-    log_path_str = config.get("path", "data/telemetry/gateway-events.jsonl")
-    log_path = PROJECT_ROOT / log_path_str
-
-    try:
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-    except OSError as e:
-        print(f"[TELEMETRY-WARN] Could not create telemetry directory: {e}")
-        return
-
-    try:
-        with open(log_path, "a", encoding="utf-8") as f:
-            json.dump(event, f)
-            f.write("\n")
-            f.flush()
-            os.fsync(f.fileno())
-    except OSError as e:
-        print(f"[TELEMETRY-WARN] Could not write to telemetry file: {e}")
+    now = datetime.now(timezone.utc).isoformat()
+    log_llm_request(
+        correlation_id=correlation_id,
+        route=route,
+        backend=backend,
+        model=model,
+        privacy=privacy,
+        status=status,
+        timestamp_start=now,
+        timestamp_end=now,
+        duration_ms=latency_ms,
+        ttft_ms=ttft_ms,
+        fallback_used=fallback_used,
+        is_stream=stream,
+        error_code=error
+    )

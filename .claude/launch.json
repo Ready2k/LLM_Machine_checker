@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "gateway",
+      "runtimeExecutable": ".venv/bin/python",
+      "runtimeArgs": ["-m", "gateway.server"],
+      "port": 8080
+    }
+  ]
+}

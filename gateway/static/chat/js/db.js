@@ -1,9 +1,9 @@
 // IndexedDB wrapper for Local AI Chat — conversations, memories, settings.
 //
 // Notes for the LAN deployment:
-//  - The gateway is served over plain HTTP (http://gatewayname:8080), which is
-//    NOT a secure context. crypto.randomUUID() is therefore unavailable; uuid()
-//    falls back to crypto.getRandomValues. IndexedDB itself works fine over HTTP.
+//  - The gateway is served over plain HTTP on the LAN (e.g. http://<host>:8080),
+//    which is NOT a secure context. crypto.randomUUID() is therefore unavailable;
+//    uuid() falls back to crypto.getRandomValues. IndexedDB works fine over HTTP.
 //  - All chat data is per-device. The gateway stores nothing about users.
 
 const DB_NAME = 'localai-chat';
