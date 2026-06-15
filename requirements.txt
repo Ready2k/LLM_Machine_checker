@@ -3,9 +3,15 @@
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
 pydantic>=2.8.0
+aiosqlite>=0.20.0
 
 # Optional: YAML config support
 PyYAML>=6.0.0
+
+# File extraction for /chat/extract (PDF and DOCX support)
+pypdf>=4.0.0
+python-docx>=1.0.0
+python-multipart>=0.0.9
 
 # Test dependencies
 pytest>=8.0.0

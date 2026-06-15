@@ -27,7 +27,8 @@ start() {
     PID=$!
     echo $PID > "$PID_FILE"
     echo "Gateway started in background (PID: $PID)."
-    echo "Dashboard available at: http://127.0.0.1:8080"
+    echo "Dashboard : http://0.0.0.0:8080"
+    echo "Chat UI   : http://0.0.0.0:8080/chat/"
 }
 
 stop() {

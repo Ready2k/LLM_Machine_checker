@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Local AI Chat</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:         #0d0d0d;
+  --surface:    #1a1a1a;
+  --surface2:   #222;
+  --border:     #2e2e2e;
+  --text:       #e0e0e0;
+  --dim:        #777;
+  --accent:     #4a8fff;
+  --accent-dk:  #2a60cc;
+  --user-bg:    #172030;
+  --user-bdr:   #1e3555;
+  --err:        #cc3333;
+  --err-bg:     #1a0000;
+  --radius:     10px;
+}
+
+html, body { height: 100%; background: var(--bg); color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  font-size: 15px; line-height: 1.55; }
+
+#app { display: flex; flex-direction: column; height: 100vh;
+  max-width: 900px; margin: 0 auto; }
+
+/* ── Header ── */
+header { display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px; border-bottom: 1px solid var(--border);
+  background: var(--surface); flex-shrink: 0; }
+
+.logo { font-weight: 700; font-size: 15px; color: var(--accent); white-space: nowrap; }
+.logo sub { font-size: 11px; color: var(--dim); font-weight: 400; }
+
+#model-select { background: var(--surface2); border: 1px solid var(--border);
+  color: var(--text); padding: 5px 8px; border-radius: 6px; font-size: 13px;
+  cursor: pointer; flex: 1; max-width: 210px; }
+#model-select:focus { outline: 1px solid var(--accent); }
+
+.hdr-gap { flex: 1; }
+
+#new-chat-btn { background: transparent; border: 1px solid var(--border);
+  color: var(--dim); padding: 5px 10px; border-radius: 6px; font-size: 13px;
+  cursor: pointer; white-space: nowrap; transition: all .15s; }
+#new-chat-btn:hover { border-color: var(--accent); color: var(--text); }
+
+/* ── Messages ── */
+#messages { flex: 1; overflow-y: auto; padding: 24px 16px;
+  display: flex; flex-direction: column; gap: 18px; }
+
+.welcome { margin: auto; text-align: center; color: var(--dim); }
+.welcome h2 { font-size: 22px; color: var(--text); margin-bottom: 10px; font-weight: 600; }
+.welcome p { font-size: 14px; margin-bottom: 4px; }
+.welcome .hint { margin-top: 14px; font-size: 12px; color: #555; }
+
+.msg { display: flex; flex-direction: column; gap: 5px; }
+
+.bubble { padding: 12px 16px; border-radius: var(--radius);
+  line-height: 1.6; word-break: break-word; white-space: pre-wrap; }
+
+.msg.user  .bubble { background: var(--user-bg); border: 1px solid var(--user-bdr);
+  align-self: flex-end; max-width: 82%; border-radius: var(--radius) var(--radius) 4px var(--radius); }
+
+.msg.assistant .bubble { background: var(--surface); border: 1px solid var(--border);
+  align-self: flex-start; width: 100%;
+  border-radius: 4px var(--radius) var(--radius) var(--radius); }
+
+.msg.error .bubble { background: var(--err-bg); border: 1px solid var(--err);
+  color: #ff8888; width: 100%; }
+
+/* Markdown inside bubbles */
+.bubble pre { background: #111; border: 1px solid var(--border); border-radius: 6px;
+  padding: 12px; overflow-x: auto; margin: 8px 0; white-space: pre; }
+.bubble code { font-family: 'SF Mono','Fira Code','Cascadia Code',monospace;
+  font-size: 13px; }
+.bubble p > code, .bubble li > code { background: #111; padding: 1px 5px;
+  border-radius: 3px; }
+.bubble p { margin-bottom: 6px; }
+.bubble p:last-child { margin-bottom: 0; }
+.bubble ul, .bubble ol { padding-left: 20px; margin: 6px 0; }
+.bubble strong { font-weight: 600; }
+.bubble em { font-style: italic; }
+
+/* Route badge */
+.badge { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.badge span { font-size: 11px; background: var(--surface2);
+  border: 1px solid var(--border); color: var(--dim);
+  padding: 1px 7px; border-radius: 4px; }
+.badge .reason { font-style: italic; background: none; border: none; color: #555; padding: 0; }
+
+/* Typing dots */
+.dots { display: inline-flex; gap: 5px; padding: 6px 0; }
+.dot { width: 6px; height: 6px; background: var(--dim); border-radius: 50%;
+  animation: bounce 1.2s infinite; }
+.dot:nth-child(2) { animation-delay: .2s; }
+.dot:nth-child(3) { animation-delay: .4s; }
+@keyframes bounce {
+  0%,80%,100% { opacity:.3; transform:translateY(0); }
+  40%          { opacity:1;  transform:translateY(-4px); }
+}
+.bubble.thinking { display: flex; align-items: center; gap: 10px; }
+.think-meta { display: flex; flex-direction: column; gap: 1px; }
+.think-label { font-size: 13px; color: var(--dim); }
+.think-note  { font-size: 12px; color: #4a4a4a; font-style: italic; min-height: 1.2em; }
+
+/* ── Footer ── */
+footer { border-top: 1px solid var(--border); padding: 10px 16px 14px;
+  background: var(--surface); flex-shrink: 0; }
+
+#file-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+#file-chips:empty { display: none; }
+
+.chip { display: flex; align-items: center; gap: 5px; background: var(--surface2);
+  border: 1px solid var(--border); border-radius: 20px;
+  padding: 3px 8px 3px 10px; font-size: 12px; color: var(--dim); }
+.chip button { background: none; border: none; color: var(--dim); cursor: pointer;
+  font-size: 15px; line-height: 1; padding: 0; margin-left: 1px; }
+.chip button:hover { color: var(--text); }
+
+.input-row { display: flex; align-items: flex-end; gap: 8px; }
+
+#msg-input { flex: 1; background: var(--surface2); border: 1px solid var(--border);
+  color: var(--text); padding: 10px 12px; border-radius: var(--radius);
+  font-size: 15px; font-family: inherit; resize: none;
+  min-height: 44px; max-height: 220px; line-height: 1.5; transition: border-color .15s; }
+#msg-input:focus { outline: none; border-color: var(--accent); }
+#msg-input::placeholder { color: #555; }
+
+.icon-btn { background: var(--surface2); border: 1px solid var(--border);
+  color: var(--dim); width: 44px; height: 44px; border-radius: var(--radius);
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; transition: all .15s; }
+.icon-btn:hover { border-color: var(--accent); color: var(--text); }
+.icon-btn.listening { border-color: var(--err); color: var(--err); animation: pulse 1s infinite; }
+.icon-btn input[type="file"] { display: none; }
+@keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.6; } }
+
+#send-btn { background: var(--accent); border: none; color: #fff;
+  padding: 0 18px; height: 44px; border-radius: var(--radius);
+  font-size: 14px; font-weight: 600; cursor: pointer;
+  flex-shrink: 0; transition: background .15s; }
+#send-btn:hover:not(:disabled) { background: var(--accent-dk); }
+#send-btn:disabled { background: var(--border); color: var(--dim); cursor: not-allowed; }
+
+/* Drop overlay */
+#drop-overlay { display: none; position: fixed; inset: 0;
+  background: rgba(74,143,255,.12); border: 3px dashed var(--accent);
+  border-radius: 12px; z-index: 100; pointer-events: none;
+  align-items: center; justify-content: center;
+  font-size: 20px; color: var(--accent); }
+#drop-overlay.on { display: flex; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+@media (max-width: 600px) {
+  .msg.user .bubble { max-width: 95%; }
+  #new-chat-btn { padding: 5px 7px; }
+}
+</style>
+</head>
+<body>
+
+<div id="drop-overlay">Drop file to attach</div>
+
+<div id="app">
+  <header>
+    <span class="logo">Local AI <sub>gateway</sub></span>
+    <select id="model-select" title="Routing model">
+      <option value="auto">Auto (smart routing)</option>
+    </select>
+    <div class="hdr-gap"></div>
+    <button id="new-chat-btn">+ New chat</button>
+  </header>
+
+  <main id="messages">
+    <div class="welcome">
+      <h2>Local AI Chat</h2>
+      <p>Type a question, speak it, or drop a file.</p>
+      <p>All requests stay on your local network.</p>
+      <p class="hint">Shift+Enter for newline &nbsp;·&nbsp; Enter to send</p>
+    </div>
+  </main>
+
+  <footer>
+    <div id="file-chips"></div>
+    <div class="input-row">
+      <!-- File attach -->
+      <label class="icon-btn" title="Attach file (text, PDF, DOCX)">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+        </svg>
+        <input type="file" id="file-input" multiple
+          accept=".txt,.md,.py,.js,.ts,.jsx,.tsx,.json,.yaml,.yml,.csv,.html,.css,.sh,.sql,.xml,.toml,.ini,.c,.cpp,.h,.rs,.go,.java,.rb,.php,.swift,.kt,.pdf,.docx">
+      </label>
+
+      <textarea id="msg-input" placeholder="Message local AI…" rows="1"></textarea>
+
+      <!-- Mic -->
+      <button class="icon-btn" id="mic-btn" title="Voice input">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+          <line x1="12" y1="19" x2="12" y2="23"/>
+          <line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+      </button>
+
+      <button id="send-btn">Send</button>
+    </div>
+  </footer>
+</div>
+
+<script>
+// ── Helpers ───────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// Minimal markdown → HTML (runs on escaped text so entities stay safe)
+function renderMd(raw) {
+  const escaped = esc(raw);
+
+  // Fenced code blocks (``` ... ```)
+  let html = escaped.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+    const trimmed = code.replace(/\n$/, '');
+    return `<pre><code>${trimmed}</code></pre>`;
+  });
+
+  // Split on <pre> blocks to avoid mangling code
+  const parts = html.split(/(<pre[\s\S]*?<\/pre>)/);
+  html = parts.map((part, i) => {
+    if (i % 2 === 1) return part; // inside a code block — leave as-is
+    return part
+      .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.+?)\*/g,     '<em>$1</em>')
+      .replace(/\n/g, '<br>');
+  }).join('');
+
+  return html;
+}
+
+// ── State ─────────────────────────────────────────────────────────────────
+const state = {
+  messages:  [],   // [{role, content}]
+  files:     [],   // [{name, content}]
+  streaming: false,
+};
+
+// ── DOM ───────────────────────────────────────────────────────────────────
+const $msgs    = document.getElementById('messages');
+const $input   = document.getElementById('msg-input');
+const $send    = document.getElementById('send-btn');
+const $mic     = document.getElementById('mic-btn');
+const $fInput  = document.getElementById('file-input');
+const $chips   = document.getElementById('file-chips');
+const $model   = document.getElementById('model-select');
+const $newChat = document.getElementById('new-chat-btn');
+const $dropOvl = document.getElementById('drop-overlay');
+
+// ── Model picker ──────────────────────────────────────────────────────────
+const LABELS = {
+  'auto':               'Auto (smart routing)',
+  'local-fast':         'Local Fast',
+  'local-quality':      'Local Quality',
+  'private-docs':       'Private Docs',
+  'local-fast-llama':   'Fast · Llama 3.1',
+  'local-fast-gemma':   'Fast · Gemma 2',
+  'local-quality-gemma':'Quality · Gemma 4',
+};
+
+async function loadModels() {
+  try {
+    const r = await fetch('/v1/models');
+    if (!r.ok) return;
+    const { data = [] } = await r.json();
+    // Sort: auto first, rest alphabetically
+    const sorted = [
+      ...data.filter(m => m.id === 'auto'),
+      ...data.filter(m => m.id !== 'auto').sort((a,b) => a.id.localeCompare(b.id)),
+    ];
+    $model.innerHTML = sorted.map(m =>
+      `<option value="${esc(m.id)}">${esc(LABELS[m.id] || m.id)}</option>`
+    ).join('');
+  } catch { /* keep the default option */ }
+}
+
+// ── Message rendering ─────────────────────────────────────────────────────
+function clearWelcome() {
+  document.querySelector('.welcome')?.remove();
+}
+
+function appendMsg(role, contentHtml, routeInfo) {
+  clearWelcome();
+  const wrap = document.createElement('div');
+  wrap.className = `msg ${role}`;
+
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  bubble.innerHTML = contentHtml;
+  wrap.appendChild(bubble);
+
+  if (role === 'assistant' && routeInfo) {
+    wrap.appendChild(makeBadge(routeInfo));
+  }
+
+  $msgs.appendChild(wrap);
+  scrollDown();
+  return bubble;
+}
+
+function makeBadge({ route, backend, model, reason }) {
+  const el = document.createElement('div');
+  el.className = 'badge';
+  if (route)   el.innerHTML += `<span>route: ${esc(route)}</span>`;
+  if (backend) el.innerHTML += `<span>backend: ${esc(backend)}</span>`;
+  if (model)   el.innerHTML += `<span>model: ${esc(model)}</span>`;
+  if (reason)  el.innerHTML += `<span class="reason">↳ ${esc(reason)}</span>`;
+  return el;
+}
+
+function addTypingDots() {
+  clearWelcome();
+  const wrap = document.createElement('div');
+  wrap.className = 'msg assistant';
+  wrap.id = '_typing';
+  wrap.innerHTML = `
+    <div class="bubble thinking">
+      <div class="dots">
+        <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+      </div>
+      <div class="think-meta">
+        <span class="think-label">Connecting…</span>
+        <span class="think-note"></span>
+      </div>
+    </div>`;
+  $msgs.appendChild(wrap);
+  scrollDown();
+
+  let base = 'Connecting';
+  const $lbl  = wrap.querySelector('.think-label');
+  const $note = wrap.querySelector('.think-note');
+  const t0    = Date.now();
+  let   tid   = setInterval(() => {
+    const s = Math.floor((Date.now() - t0) / 1000);
+    $lbl.textContent = s > 0 ? `${base} (${s}s)` : `${base}…`;
+    if (s === 12) $note.textContent = 'Quality models can take a moment…';
+  }, 1000);
+
+  return {
+    el: wrap,
+    setGenerating(modelName) {
+      base = modelName ? `Generating · ${modelName}` : 'Generating';
+      $note.textContent = '';
+    },
+    stop() { if (tid) { clearInterval(tid); tid = null; } },
+  };
+}
+
+function scrollDown() {
+  $msgs.scrollTop = $msgs.scrollHeight;
+}
+
+// ── Send ──────────────────────────────────────────────────────────────────
+async function send() {
+  if (state.streaming) return;
+  const text = $input.value.trim();
+  if (!text && state.files.length === 0) return;
+
+  // Build user content string
+  let userContent = text;
+  if (state.files.length > 0) {
+    const fileParts = state.files
+      .map(f => `[File: ${f.name}]\n${f.content}`)
+      .join('\n\n---\n\n');
+    userContent = userContent ? `${userContent}\n\n${fileParts}` : fileParts;
+  }
+
+  $input.value = '';
+  autoResize();
+  clearFiles();
+
+  appendMsg('user', renderMd(userContent));
+  state.messages.push({ role: 'user', content: userContent });
+
+  const thinking = addTypingDots();
+  state.streaming = true;
+  $send.disabled = true;
+
+  try {
+    const resp = await fetch('/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: $model.value,
+        messages: state.messages,
+        stream: true,
+      }),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+      const msg = (typeof err.detail === 'object' ? err.detail.message : err.detail) || resp.statusText;
+      throw new Error(msg);
+    }
+
+    const routeInfo = {
+      route:   resp.headers.get('x-ai-route'),
+      backend: resp.headers.get('x-ai-backend'),
+      model:   resp.headers.get('x-ai-model'),
+      reason:  resp.headers.get('x-ai-auto-reason'),
+    };
+
+    thinking.setGenerating(routeInfo.model || routeInfo.route);
+    thinking.stop();
+    thinking.el.remove();
+
+    // Create the assistant message wrapper now; badge added after stream
+    clearWelcome();
+    const wrap = document.createElement('div');
+    wrap.className = 'msg assistant';
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    wrap.appendChild(bubble);
+    $msgs.appendChild(wrap);
+    scrollDown();
+
+    const reader = resp.body.getReader();
+    const dec    = new TextDecoder();
+    let buf = '', full = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const data = line.slice(6).trim();
+          if (data === '[DONE]') continue;
+          try {
+            const token = JSON.parse(data)?.choices?.[0]?.delta?.content || '';
+            if (token) {
+              full += token;
+              bubble.innerHTML = renderMd(full);
+              scrollDown();
+            }
+          } catch { /* ignore malformed chunk */ }
+        }
+      }
+    } catch (streamErr) {
+      // Show whatever arrived before the drop
+      if (!full) throw streamErr;
+      bubble.innerHTML = renderMd(full) + ' <span style="color:var(--err)">[stream interrupted]</span>';
+    }
+
+    // Badge appears once stream is complete
+    if (routeInfo.route || routeInfo.backend) {
+      wrap.appendChild(makeBadge(routeInfo));
+    }
+
+    state.messages.push({ role: 'assistant', content: full });
+
+  } catch (err) {
+    thinking.stop();
+    document.getElementById('_typing')?.remove();
+    appendMsg('error', esc(`Error: ${err.message}`));
+  } finally {
+    state.streaming = false;
+    $send.disabled = false;
+    $input.focus();
+  }
+}
+
+// ── File handling ─────────────────────────────────────────────────────────
+const TEXT_EXTS = new Set([
+  'txt','md','py','js','ts','jsx','tsx','json','yaml','yml',
+  'csv','html','css','sh','bash','zsh','sql','xml','toml','ini','env',
+  'c','cpp','h','rs','go','java','rb','php','swift','kt',
+]);
+
+async function processFile(file) {
+  if (file.size > 5 * 1024 * 1024) {
+    alert(`${file.name}: too large (max 5 MB)`);
+    return null;
+  }
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+
+  if (TEXT_EXTS.has(ext)) {
+    return { name: file.name, content: await file.text() };
+  }
+
+  if (ext === 'pdf' || ext === 'docx') {
+    const form = new FormData();
+    form.append('file', file);
+    const r = await fetch('/chat/extract', { method: 'POST', body: form });
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({ detail: r.statusText }));
+      alert(`${file.name}: ${e.detail || r.statusText}`);
+      return null;
+    }
+    const { text, chars } = await r.json();
+    console.log(`Extracted ${chars} chars from ${file.name}`);
+    return { name: file.name, content: text };
+  }
+
+  alert(`${file.name}: unsupported type (.${ext})\nAccepted: text files, .pdf, .docx`);
+  return null;
+}
+
+async function addFiles(list) {
+  for (const f of list) {
+    const result = await processFile(f);
+    if (result) {
+      state.files.push(result);
+      renderChips();
+    }
+  }
+}
+
+function renderChips() {
+  $chips.innerHTML = state.files.map((f, i) => `
+    <div class="chip">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+        <polyline points="14 2 14 8 20 8"/>
+      </svg>
+      ${esc(f.name)}
+      <button onclick="removeFile(${i})" title="Remove">×</button>
+    </div>
+  `).join('');
+}
+
+function removeFile(i) {
+  state.files.splice(i, 1);
+  renderChips();
+}
+
+function clearFiles() {
+  state.files = [];
+  $chips.innerHTML = '';
+  $fInput.value = '';
+}
+
+// ── Voice input ───────────────────────────────────────────────────────────
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+if (!SR) {
+  $mic.title = 'Voice not supported in this browser (try Chrome or Safari)';
+  $mic.style.opacity = '.35';
+  $mic.disabled = true;
+} else {
+  const recog = new SR();
+  recog.continuous = false;
+  recog.interimResults = true;
+  recog.lang = 'en-US';
+
+  let listening = false;
+
+  recog.onstart = () => { listening = true;  $mic.classList.add('listening');
+    $mic.title = 'Listening… click to stop'; };
+  recog.onend   = () => { listening = false; $mic.classList.remove('listening');
+    $mic.title = 'Voice input'; };
+  recog.onerror = (e) => { console.warn('speech error', e.error);
+    listening = false; $mic.classList.remove('listening'); };
+
+  recog.onresult = (e) => {
+    $input.value = Array.from(e.results).map(r => r[0].transcript).join('');
+    autoResize();
+  };
+
+  $mic.addEventListener('click', () => listening ? recog.stop() : recog.start());
+}
+
+// ── Textarea auto-resize ──────────────────────────────────────────────────
+function autoResize() {
+  $input.style.height = 'auto';
+  $input.style.height = Math.min($input.scrollHeight, 220) + 'px';
+}
+$input.addEventListener('input', autoResize);
+$input.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+});
+
+// ── Drag-and-drop ─────────────────────────────────────────────────────────
+let dragN = 0;
+document.addEventListener('dragenter',  e => { e.preventDefault(); dragN++; $dropOvl.classList.add('on'); });
+document.addEventListener('dragleave',  ()  => { if (--dragN <= 0) { dragN=0; $dropOvl.classList.remove('on'); }});
+document.addEventListener('dragover',   e  => e.preventDefault());
+document.addEventListener('drop', e => {
+  e.preventDefault(); dragN=0; $dropOvl.classList.remove('on');
+  if (e.dataTransfer?.files?.length) addFiles(e.dataTransfer.files);
+});
+
+// ── New chat ──────────────────────────────────────────────────────────────
+$newChat.addEventListener('click', () => {
+  state.messages = [];
+  clearFiles();
+  $msgs.innerHTML = `
+    <div class="welcome">
+      <h2>Local AI Chat</h2>
+      <p>Type a question, speak it, or drop a file.</p>
+      <p>All requests stay on your local network.</p>
+      <p class="hint">Shift+Enter for newline &nbsp;·&nbsp; Enter to send</p>
+    </div>`;
+  $input.focus();
+});
+
+// ── Wire up remaining events ──────────────────────────────────────────────
+$send.addEventListener('click', send);
+$fInput.addEventListener('change', () => addFiles($fInput.files));
+
+// ── Init ──────────────────────────────────────────────────────────────────
+loadModels();
+$input.focus();
+</script>
+</body>
+</html>

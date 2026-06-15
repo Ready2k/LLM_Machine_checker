@@ -1,21 +1,23 @@
 """
-Local AI Fabric — Dashboard Server
+Local AI Fabric — Gateway Server
 
-FastAPI application serving the admin/status web dashboard.
-Reads inventory from inventory/machines.json, exposes machine fleet data,
-route configuration, and safe local profiler execution.
+FastAPI application serving the admin dashboard and /chat/ UI.
+Routes LLM requests across local backends (Ollama, LM Studio).
 
-Default bind: 127.0.0.1:8080 (localhost only per security requirements).
+Bind address: GATEWAY_HOST env var (default 0.0.0.0 — all interfaces).
+Port:         GATEWAY_PORT env var (default 8080).
 """
 
+import io
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Optional
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, HTTPException, Header, Request
+from fastapi import FastAPI, File, HTTPException, Header, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -37,6 +39,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 INVENTORY_PATH = PROJECT_ROOT / "inventory" / "machines.json"
 PROFILER_PATH = PROJECT_ROOT / "profile_machine.py"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+CHAT_STATIC_DIR = STATIC_DIR / "chat"
 CONFIG_DIR = PROJECT_ROOT / "config"
 
 # ---------------------------------------------------------------------------
@@ -296,6 +299,59 @@ async def serve_dashboard():
     if not index_path.exists():
         raise HTTPException(status_code=404, detail="Dashboard not found")
     return FileResponse(str(index_path), media_type="text/html")
+
+
+@app.get("/chat", include_in_schema=False)
+async def redirect_chat():
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/chat/")
+
+
+@app.get("/chat/")
+async def serve_chat():
+    """Serve the chat UI."""
+    chat_index = CHAT_STATIC_DIR / "index.html"
+    if not chat_index.exists():
+        raise HTTPException(status_code=404, detail="Chat UI not found")
+    return FileResponse(str(chat_index), media_type="text/html")
+
+
+@app.post("/chat/extract")
+async def extract_file(file: UploadFile = File(...)):
+    """Extract plain text from an uploaded file (PDF, DOCX, or text)."""
+    MAX_BYTES = 5 * 1024 * 1024
+    content = await file.read()
+    if len(content) > MAX_BYTES:
+        raise HTTPException(status_code=413, detail="File too large (max 5 MB)")
+
+    name = (file.filename or "").lower()
+
+    if name.endswith(".pdf"):
+        try:
+            from pypdf import PdfReader
+        except ImportError:
+            raise HTTPException(status_code=501, detail="pypdf not installed — run: pip install pypdf")
+        reader = PdfReader(io.BytesIO(content))
+        text = "\n\n".join(page.extract_text() or "" for page in reader.pages).strip()
+
+    elif name.endswith(".docx"):
+        try:
+            from docx import Document
+        except ImportError:
+            raise HTTPException(status_code=501, detail="python-docx not installed — run: pip install python-docx")
+        doc = Document(io.BytesIO(content))
+        text = "\n".join(p.text for p in doc.paragraphs if p.text).strip()
+
+    else:
+        try:
+            text = content.decode("utf-8")
+        except UnicodeDecodeError:
+            raise HTTPException(
+                status_code=415,
+                detail="Binary file — only text, PDF, and DOCX are supported",
+            )
+
+    return {"text": text, "filename": file.filename, "chars": len(text)}
 
 
 @app.get("/api/health", response_model=HealthResponse)
@@ -802,9 +858,11 @@ async def route_test(request: RouteTestRequest):
 if __name__ == "__main__":
     import uvicorn
 
+    _host = os.environ.get("GATEWAY_HOST", "0.0.0.0")
+    _port = int(os.environ.get("GATEWAY_PORT", "8080"))
     uvicorn.run(
         "gateway.server:app",
-        host="127.0.0.1",
-        port=8080,
-        reload=True,
+        host=_host,
+        port=_port,
+        reload=False,
     )
