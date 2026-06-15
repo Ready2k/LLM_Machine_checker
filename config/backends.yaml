@@ -2,8 +2,8 @@ backends:
   pc-rtx2070:
     role: local_fast
     runtime: ollama
-    endpoint: http://pc-ai.local:11434
-    openai_endpoint: http://pc-ai.local:11434/v1
+    endpoint: http://Desktop-HomePC.local:11434
+    openai_endpoint: http://Desktop-HomePC.local:11434/v1
     enabled: true
     inference_enabled: true
     health_path: /api/tags
