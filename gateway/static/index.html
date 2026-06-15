@@ -6,7 +6,7 @@
   <meta name="description" content="Local AI Fabric — Admin dashboard for managing a federated local AI inference fleet.">
   <meta name="theme-color" content="#0a0e1a">
   <title>Local AI Fabric — Command Center</title>
-  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="stylesheet" href="/static/css/style.css?v=1.2">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
 </head>
 <body>
@@ -93,14 +93,54 @@
       </div>
 
       <!-- WIDGET: Observability Logs -->
-      <div class="widget fade-in" id="widget-observability" data-widget-title="Observability Logs" data-widget-icon="📊">
+      <div class="widget fade-in" id="widget-observability" data-widget-title="Observability Logs" data-widget-icon="📊" style="grid-column: 1 / -1;">
         <div class="widget-header">
-          <h2 class="section-title"><span class="icon">📊</span> Observability</h2>
+          <h2 class="section-title"><span class="icon">📊</span> SRE Observability</h2>
           <button class="btn-remove-widget" data-target="widget-observability" title="Remove Widget">✕</button>
         </div>
-        <div id="observability-panel">
-            <div class="glass-card-static empty-state text-dim">Waiting for telemetry...</div>
+        <div id="observability-panel" class="obs-panel-container">
+            <div class="obs-tabs">
+                <button class="obs-tab active" data-obs-tab="traces">Traces</button>
+                <button class="obs-tab" data-obs-tab="overview">Overview</button>
+                <button class="obs-tab" data-obs-tab="logs">Logs</button>
+                <button class="obs-tab" data-obs-tab="audit">Audit Export</button>
+            </div>
+            <div class="obs-tab-content active" id="obs-tab-traces">
+                <div class="obs-toolbar">
+                    <button id="obs-refresh-traces" class="btn btn-sm">Refresh Traces</button>
+                </div>
+                <div class="obs-table-wrapper">
+                    <table class="obs-table" id="obs-traces-table">
+                        <thead>
+                            <tr>
+                                <th>Timestamp</th>
+                                <th>Correlation ID</th>
+                                <th>Route</th>
+                                <th>Backend</th>
+                                <th>Model</th>
+                                <th>Duration</th>
+                                <th>TTFT</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td colspan="8" class="text-dim text-center">Loading traces...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="obs-tab-content" id="obs-tab-overview">
+                <p class="text-dim">Overview metrics coming soon.</p>
+            </div>
+            <div class="obs-tab-content" id="obs-tab-logs">
+                <p class="text-dim">Provider log collection coming soon.</p>
+            </div>
+            <div class="obs-tab-content" id="obs-tab-audit">
+                <button id="obs-btn-export-audit" class="btn primary-glow">Download Audit Bundle</button>
+                <p class="text-dim" style="margin-top: 1rem;">Export the last 1000 requests for offline audit and compliance review.</p>
+            </div>
         </div>
+        
       </div>
 
       <!-- WIDGET: Architecture Diagram -->
@@ -145,6 +185,18 @@
 
 </div>
 
+  <!-- Trace Detail Drawer (moved to root for z-index stacking context) -->
+  <div id="obs-trace-drawer" class="obs-drawer hidden">
+      <div class="obs-drawer-header">
+          <h3>Trace Details</h3>
+          <button id="obs-drawer-close" class="btn-remove-widget">✕</button>
+      </div>
+      <div class="obs-drawer-content" id="obs-drawer-content">
+          <!-- Injected via JS -->
+      </div>
+  </div>
+
 <script src="/static/js/app.js"></script>
+<script src="/static/js/observability.js"></script>
 </body>
 </html>
