@@ -192,6 +192,18 @@ p { color: var(--text-muted); }
   gap: 0.75rem;
 }
 
+.menu-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.menu-divider {
+  height: 1px;
+  background: var(--border-light);
+  margin: 0.5rem 0;
+}
+
 .nav-btn {
   background: rgba(255,255,255,0.02);
   color: var(--text);
@@ -205,6 +217,17 @@ p { color: var(--text-muted); }
   font-weight: 600;
   transition: all var(--transition-fast);
   text-align: left;
+  text-decoration: none;
+}
+
+.nav-btn.active {
+  background: var(--primary-dim);
+  border-color: var(--primary);
+  color: var(--text);
+}
+
+.nav-btn.active .icon {
+  color: var(--primary);
 }
 
 .nav-btn:hover {
@@ -291,31 +314,54 @@ p { color: var(--text-muted); }
   color: var(--danger);
 }
 
-/* --- Dock Layouts --- */
-.nav-top {
-  flex-direction: column !important;
+/* --- Collapsed Sidebar --- */
+.sidebar {
+  transition: width var(--transition-base), padding var(--transition-base);
 }
-.nav-top .sidebar {
-  width: 100%;
-  height: 75px;
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  border-right: none;
-  border-bottom: 1px solid var(--border);
-  padding: 0 2rem;
-}
-.nav-top .sidebar-brand { margin-bottom: 0; }
-.nav-top .sidebar-menu { flex: unset; flex-direction: row; align-items: center; }
-.nav-top .sidebar-footer { margin-top: 0; padding-top: 0; border-top: none; }
-.nav-top .sidebar-controls { flex-direction: row; align-items: center; gap: 1.5rem; }
 
-.nav-right {
-  flex-direction: row-reverse !important;
+.sidebar.collapsed {
+  width: 80px;
+  padding: 1.5rem 0.5rem;
 }
-.nav-right .sidebar {
-  border-right: none;
-  border-left: 1px solid var(--border);
+
+.sidebar.collapsed .brand-text,
+.sidebar.collapsed .label,
+.sidebar.collapsed .toggle-wrap {
+  display: none;
+}
+
+.sidebar.collapsed .sidebar-brand {
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.sidebar.collapsed .nav-btn {
+  justify-content: center;
+  padding: 0.75rem 0;
+}
+
+.sidebar.collapsed .nav-btn .icon {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.sidebar.collapsed .sidebar-controls {
+  align-items: center;
+}
+
+.btn-collapse {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: transform var(--transition-fast);
+  margin-left: auto;
+}
+
+.sidebar.collapsed .btn-collapse {
+  transform: scaleX(-1);
+  margin-left: 0;
 }
 
 /* --- Modals --- */

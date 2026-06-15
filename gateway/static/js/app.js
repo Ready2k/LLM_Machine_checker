@@ -43,7 +43,7 @@
     lastRefresh: $("#last-refresh"),
     autoRefreshToggle: $("#auto-refresh-toggle"),
     refreshBtn: $("#refresh-btn"),
-    btnDockLayout: $("#btn-dock-layout"),
+    btnCollapseSidebar: $("#btn-collapse-sidebar"),
     btnAddWidget: $("#btn-add-widget"),
     widgetModal: $("#widget-modal"),
     btnCloseModal: $("#btn-close-modal"),
@@ -805,7 +805,6 @@
     state.lastRefresh = now;
     const ts = formatTime(now);
     dom.lastRefresh.textContent = `Last: ${ts}`;
-    dom.footerRefresh.textContent = `Last refresh: ${ts}`;
   }
 
   // ── Fetch All ──
@@ -1067,13 +1066,13 @@
             const statusIcon = ev.status === "success" ? "✓" : "✗";
             
             tr.innerHTML = `
-                <td class="mono">\${timeStr}</td>
-                <td>\${escapeHtml(ev.route)}</td>
-                <td>\${escapeHtml(ev.backend)}</td>
-                <td>\${escapeHtml(ev.model)}</td>
-                <td>\${escapeHtml(ev.privacy)}</td>
-                <td class="mono">\${ev.latency_ms != null ? ev.latency_ms + "ms" : "—"}</td>
-                <td>\${statusIcon} \${streamBadge}</td>
+                <td class="mono">${timeStr}</td>
+                <td>${escapeHtml(ev.route)}</td>
+                <td>${escapeHtml(ev.backend)}</td>
+                <td>${escapeHtml(ev.model)}</td>
+                <td>${escapeHtml(ev.privacy)}</td>
+                <td class="mono">${ev.latency_ms != null ? ev.latency_ms + "ms" : "—"}</td>
+                <td>${statusIcon} ${streamBadge}</td>
             `;
             tbody.appendChild(tr);
         }
@@ -1102,11 +1101,15 @@
       pinned = ["widget-fleet", "widget-spider", "widget-observability", "widget-routing"];
     }
 
-    let navPos = localStorage.getItem("nav_position") || "nav-left";
+    let isCollapsed = localStorage.getItem("sidebar_collapsed") === "true";
 
-    function applyDocking() {
-      dom.appContainer.className = navPos;
-      dom.btnDockLayout.innerHTML = `<span class="icon">🔄</span> Dock: ${navPos.replace('nav-', '').toUpperCase()}`;
+    function applySidebarState() {
+      const sidebar = document.getElementById("sidebar");
+      if (isCollapsed) {
+        sidebar.classList.add("collapsed");
+      } else {
+        sidebar.classList.remove("collapsed");
+      }
     }
 
     function applyWidgets() {
@@ -1122,15 +1125,25 @@
       localStorage.setItem("dashboard_widgets", JSON.stringify(pinned));
     }
 
-    applyDocking();
+    applySidebarState();
     applyWidgets();
 
-    dom.btnDockLayout.addEventListener("click", () => {
-      if (navPos === "nav-left") navPos = "nav-top";
-      else if (navPos === "nav-top") navPos = "nav-right";
-      else navPos = "nav-left";
-      localStorage.setItem("nav_position", navPos);
-      applyDocking();
+    if (dom.btnCollapseSidebar) {
+      dom.btnCollapseSidebar.addEventListener("click", () => {
+        isCollapsed = !isCollapsed;
+        localStorage.setItem("sidebar_collapsed", isCollapsed);
+        applySidebarState();
+      });
+    }
+
+    // Sidebar navigation active state
+    const navLinks = document.querySelectorAll("#main-nav-links .nav-btn");
+    navLinks.forEach(link => {
+      link.addEventListener("click", (e) => {
+        navLinks.forEach(l => l.classList.remove("active"));
+        link.classList.add("active");
+        // Optionally, smooth scrolling is handled by CSS (scroll-behavior: smooth)
+      });
     });
 
     dom.btnAddWidget.addEventListener("click", () => {
@@ -1168,14 +1181,16 @@
   }
 
   // ── Radar Chart ──
-  function drawRadarChart(machinesObj) {
+  function drawRadarChart(machinesData) {
     if (!dom.spiderPanel) return;
-    if (!machinesObj || Object.keys(machinesObj).length === 0) {
+    
+    const machines = machinesData && machinesData.machines ? machinesData.machines : [];
+    
+    if (machines.length === 0) {
       dom.spiderPanel.innerHTML = '<div class="empty-state text-dim">Waiting for node data...</div>';
       return;
     }
 
-    const mKeys = Object.keys(machinesObj);
     const numAxes = 5;
     const axes = ["Compute", "Memory", "Speed", "IOPS", "Network"];
     const w = 300, h = 300;
@@ -1212,16 +1227,14 @@
     let colorIdx = 0;
     let legendStr = `<div style="display:flex; justify-content:center; gap:1rem; margin-top:1rem; flex-wrap:wrap">`;
 
-    for (const key of mKeys) {
-        const m = machinesObj[key];
-        const sys = m.sys_info;
-        if (!sys) continue;
+    for (const m of machines) {
+        if (!m.compatible && m.recommended_role !== "utility_node") continue;
         
-        const computeScore = sys.gpu_count > 0 ? 0.9 : (sys.cpu_cores / 16);
-        const memoryScore = sys.total_ram_gb / 64;
-        const speedScore = m.status === 'online' ? 0.8 : 0.2;
-        const iopsScore = sys.os.includes("macOS") ? 0.8 : 0.6;
-        const netScore = 0.7;
+        const computeScore = (m.gpu_name && m.gpu_name !== "Unknown") ? 0.9 : 0.4;
+        const memoryScore = (m.ram_gb || 8) / 64;
+        const speedScore = m.measured_tokens_per_second ? Math.min(m.measured_tokens_per_second / 40, 1.0) : 0.2;
+        const iopsScore = m.os.includes("Darwin") || m.os.includes("macOS") ? 0.8 : 0.6;
+        const netScore = m.routing && m.routing.enabled ? 0.9 : 0.4;
 
         const scores = [
             Math.min(1, Math.max(0.1, computeScore)),
@@ -1241,7 +1254,7 @@
         const color = colors[colorIdx % colors.length];
         svgStr += `<polygon points="${pts.join(" ")}" fill="${color}33" stroke="${color}" stroke-width="2" style="filter: drop-shadow(0 0 8px ${color}80);" />`;
         
-        legendStr += `<div style="display:flex; align-items:center; gap:6px; font-size:0.85rem; color:var(--text)"><span style="display:inline-block;width:10px;height:10px;background:${color};border-radius:50%;box-shadow:0 0 5px ${color}"></span>${humanName(key)}</div>`;
+        legendStr += `<div style="display:flex; align-items:center; gap:6px; font-size:0.85rem; color:var(--text)"><span style="display:inline-block;width:10px;height:10px;background:${color};border-radius:50%;box-shadow:0 0 5px ${color}"></span>${humanName(m.id)}</div>`;
         colorIdx++;
     }
     
