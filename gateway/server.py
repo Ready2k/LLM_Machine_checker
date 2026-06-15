@@ -782,8 +782,8 @@ async def chat_completions(request: ChatCompletionRequest, x_ai_privacy: Optiona
                 async for chunk in gen:
                     if ttft is None:
                         ttft = int((time.time() - start_time) * 1000)
-                log_llm_event(correlation_id, "provider.stream.first_token", f"First token received in {ttft}ms")
-                yield chunk
+                        log_llm_event(correlation_id, "provider.stream.first_token", f"First token received in {ttft}ms")
+                    yield chunk
                 latency_ms = int((time.time() - start_time) * 1000)
                 log_routing_decision(route_name, request.model, privacy_level, backend_id, fallback_used, "success", error=auto_reason, latency_ms=latency_ms, ttft_ms=ttft, stream=True, correlation_id=correlation_id)
                 log_llm_event(correlation_id, "request.complete", "Stream completed successfully", {"latency_ms": latency_ms})
