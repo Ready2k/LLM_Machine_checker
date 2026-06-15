@@ -9,7 +9,7 @@ client = TestClient(app)
 @respx.mock
 def test_chat_completions_basic_routing():
     # Mock Ollama backend for local-fast
-    route = respx.post("http://pc-ai.local:11434/v1/chat/completions").mock(
+    route = respx.post("http://desktop-homepc.local:11434/v1/chat/completions").mock(
         return_value=httpx.Response(200, json={
             "id": "chatcmpl-123",
             "object": "chat.completion",
@@ -42,15 +42,20 @@ def test_chat_completion_unknown_model_rejected():
     assert response.status_code == 400
     assert response.json()["detail"]["type"] == "unknown_model"
 
-def test_streaming_rejected():
-    response = client.post("/v1/chat/completions", json={
-        "model": "local-fast",
-        "messages": [{"role": "user", "content": "Hi"}],
-        "stream": True
-    })
-    
-    assert response.status_code == 400
-    assert response.json()["detail"]["type"] == "stream_disabled"
+def test_streaming_supported():
+    @respx.mock
+    def run_test():
+        respx.post("http://desktop-homepc.local:11434/v1/chat/completions").mock(
+            return_value=httpx.Response(200, text="data: {}\n\n")
+        )
+        response = client.post("/v1/chat/completions", json={
+            "model": "local-fast",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "stream": True
+        })
+        
+        assert response.status_code == 200
+    run_test()
 
 def test_cloud_best_request_returns_route_disabled():
     response = client.post("/v1/chat/completions", json={

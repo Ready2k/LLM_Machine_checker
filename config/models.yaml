@@ -1,4 +1,10 @@
 models:
+  auto:
+    route: local-fast
+    model: auto
+    provider: auto
+    purpose: intelligent auto-routing — gateway selects route based on prompt analysis
+
   local-fast:
     route: local-fast
     model: qwen2.5-coder:7b
@@ -7,15 +13,33 @@ models:
 
   local-quality:
     route: local-quality
-    model: qwen-coder-14b-q4
+    model: qwen2.5-coder-14b-instruct-uncensored
     provider: lmstudio
     purpose: higher quality local reasoning/coding
 
   private-docs:
     route: private-docs
-    model: qwen-coder-14b-q4
+    model: qwen2.5-coder-14b-instruct-uncensored
     provider: lmstudio
     purpose: local-only private document work
+
+  local-fast-llama:
+    route: local-fast
+    model: llama3.1:8b
+    provider: ollama
+    purpose: fast local general reasoning/chat (Llama 3.1 8B)
+
+  local-fast-gemma:
+    route: local-fast
+    model: gemma2:2b
+    provider: ollama
+    purpose: lightweight fast local chat
+
+  local-quality-gemma:
+    route: local-quality
+    model: google/gemma-4-e4b
+    provider: lmstudio
+    purpose: fast quality local chat (Gemma 4 4B on M4)
 
   cloud-best:
     route: cloud-best

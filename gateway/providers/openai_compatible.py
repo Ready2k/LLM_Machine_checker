@@ -63,6 +63,24 @@ class OpenAICompatibleProvider(Provider):
                 models.append(ModelInfo(id=m.get("id")))
             return models
 
+    async def chat_completions_stream(self, request: ChatCompletionRequest, mapped_model: str):
+        url = f"{self.endpoint}/chat/completions" if self.endpoint.endswith("/v1") else f"{self.endpoint}/v1/chat/completions"
+        payload = {
+            "model": mapped_model,
+            "messages": request.messages,
+            "stream": True,
+        }
+        if request.temperature is not None:
+            payload["temperature"] = request.temperature
+        if request.max_tokens is not None:
+            payload["max_tokens"] = request.max_tokens
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            async with client.stream("POST", url, json=payload) as resp:
+                resp.raise_for_status()
+                async for chunk in resp.aiter_bytes():
+                    yield chunk
+
     async def chat_completions(self, request: ChatCompletionRequest, mapped_model: str) -> ChatCompletionResponse:
         url = f"{self.endpoint}/chat/completions" if self.endpoint.endswith("/v1") else f"{self.endpoint}/v1/chat/completions"
         

@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-06-14",
+  "updated_at": "2026-06-15",
   "summary": {
     "recommended_architecture": "federated_local_ai_fabric",
     "primary_quality_node": "macbook-m4pro",
@@ -39,10 +39,10 @@
     },
     {
       "id": "pc-rtx2070",
-      "hostname": "pc-ai.local",
+      "hostname": "Desktop-HomePC.local",
       "os": "Windows",
       "arch": "x86_64",
-      "cpu": "Unknown Windows CPU; expected Ryzen 7 5800X from prior inventory",
+      "cpu": "Unknown Windows CPU",
       "ram_gb": 32.0,
       "gpu_name": "NVIDIA GeForce RTX 2070",
       "vram_gb": 8.0,

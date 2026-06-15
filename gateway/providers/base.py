@@ -47,3 +47,6 @@ class Provider:
 
     async def chat_completions(self, request: ChatCompletionRequest, mapped_model: str) -> ChatCompletionResponse:
         raise NotImplementedError()
+
+    async def chat_completions_stream(self, request: ChatCompletionRequest, mapped_model: str):
+        raise NotImplementedError()

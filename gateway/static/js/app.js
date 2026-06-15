@@ -17,6 +17,8 @@
     profile: "/api/profile/current",
     profileRun: "/api/profile/run",
     backendsHealth: "/api/backends/health",
+    events: "/api/events",
+    stats: "/api/stats",
   };
 
   // ── State ──
@@ -36,11 +38,16 @@
   const $$ = (sel) => document.querySelectorAll(sel);
 
   const dom = {
+    appContainer: $("#app-container"),
     statusDot: $("#system-status-dot"),
     lastRefresh: $("#last-refresh"),
-    footerRefresh: $("#footer-refresh"),
     autoRefreshToggle: $("#auto-refresh-toggle"),
     refreshBtn: $("#refresh-btn"),
+    btnDockLayout: $("#btn-dock-layout"),
+    btnAddWidget: $("#btn-add-widget"),
+    widgetModal: $("#widget-modal"),
+    btnCloseModal: $("#btn-close-modal"),
+    widgetGallery: $("#widget-gallery"),
     fleetGrid: $("#fleet-grid"),
     fleetLoading: $("#fleet-loading"),
     profilePanel: $("#profile-panel"),
@@ -48,6 +55,8 @@
     routingGrid: $("#routing-grid"),
     routingLoading: $("#routing-loading"),
     archPanel: $("#arch-panel"),
+    observabilityPanel: $("#observability-panel"),
+    spiderPanel: $("#spider-panel"),
   };
 
   // ── Helpers ──
@@ -851,6 +860,10 @@
 
     // Architecture (uses machine data)
     renderArchitecture(state.machines);
+    drawRadarChart(state.machines);
+
+    // Observability
+    fetchObservability();
   }
 
   // ── Error Renders ──
@@ -904,20 +917,358 @@
     return div.innerHTML;
   }
 
+  // ── Observability ──
+
+  async function fetchObservability() {
+    try {
+      const [statsRes, eventsRes] = await Promise.all([
+        fetch(API.stats).then(r => r.json()),
+        fetch(API.events + "?limit=50").then(r => r.json())
+      ]);
+      renderObservability(statsRes, eventsRes);
+    } catch (err) {
+      console.error("Failed to fetch observability data", err);
+      if (dom.observabilityPanel) {
+        dom.observabilityPanel.innerHTML = '<div class="glass-card-static error-state"><p class="text-muted">Failed to load observability data.</p></div>';
+      }
+    }
+  }
+
+  function renderObservability(stats, eventsData) {
+    const panel = dom.observabilityPanel;
+    if (!panel) return;
+    panel.innerHTML = "";
+
+    // 1. Stats Bar
+    if (stats && stats.total_requests > 0) {
+      const statsBar = el("div", { className: "obs-stats-bar glass-card-static", style: { marginBottom: "1rem" } });
+      
+      const topChips = el("div", { style: { display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.5rem" } });
+      topChips.appendChild(el("div", { className: "obs-stat-chip badge" }, `Total: ${stats.total_requests}`));
+      topChips.appendChild(el("div", { className: "obs-stat-chip badge" }, `Success: ${stats.success_rate_pct}%`));
+      topChips.appendChild(el("div", { className: "obs-stat-chip badge" }, `Errors: ${stats.error_count}`));
+      topChips.appendChild(el("div", { className: "obs-stat-chip badge" }, `Fallbacks: ${stats.fallback_count}`));
+      topChips.appendChild(el("div", { className: "obs-stat-chip badge" }, `Streams: ${stats.stream_count}`));
+      statsBar.appendChild(topChips);
+
+      const routeChips = el("div", { style: { display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.5rem" } });
+      routeChips.appendChild(el("span", { className: "text-dim", style: { fontSize: "0.8rem", marginRight: "0.5rem" } }, "Routes:"));
+      for (const [r, c] of Object.entries(stats.requests_by_route || {})) {
+        routeChips.appendChild(el("div", { className: "obs-stat-chip badge" }, `${r} ${c}`));
+      }
+      statsBar.appendChild(routeChips);
+
+      const latChips = el("div", { style: { display: "flex", gap: "0.5rem", flexWrap: "wrap" } });
+      latChips.appendChild(el("span", { className: "text-dim", style: { fontSize: "0.8rem", marginRight: "0.5rem" } }, "Avg latency:"));
+      for (const [b, l] of Object.entries(stats.avg_latency_ms_by_backend || {})) {
+        latChips.appendChild(el("div", { className: "obs-stat-chip badge" }, `${b} ${l}ms`));
+      }
+      statsBar.appendChild(latChips);
+
+      panel.appendChild(statsBar);
+    }
+
+    // 2. Sparklines
+    if (stats && stats.avg_latency_ms_by_backend) {
+      const sparkContainer = el("div", { className: "glass-card-static", style: { marginBottom: "1rem" } });
+      let hasData = false;
+      
+      // Extract latencies by backend from recent events
+      const recentLats = {};
+      if (eventsData && eventsData.events) {
+          const revEvents = [...eventsData.events].reverse();
+          for (const ev of revEvents) {
+              if (ev.latency_ms != null && ev.backend) {
+                  if (!recentLats[ev.backend]) recentLats[ev.backend] = [];
+                  recentLats[ev.backend].push(ev.latency_ms);
+              }
+          }
+      }
+
+      for (const [b, avgLat] of Object.entries(stats.avg_latency_ms_by_backend)) {
+        const lats = recentLats[b] || [];
+        if (lats.length === 0) continue;
+        hasData = true;
+
+        const row = el("div", { className: "obs-sparkline-row" });
+        const label = el("div", { style: { width: "150px", fontSize: "0.8rem" } },
+            el("div", { className: "mono text-dim" }, b),
+            el("div", { style: { fontWeight: "bold" } }, `Avg: ${avgLat}ms`)
+        );
+        row.appendChild(label);
+
+        // Draw SVG
+        const w = 300;
+        const h = 40;
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+        svg.setAttribute("width", "100%");
+        svg.setAttribute("height", h);
+        svg.style.flex = "1";
+        
+        const minL = Math.min(...lats);
+        const maxL = Math.max(...lats);
+        const range = maxL - minL || 1;
+        
+        const points = lats.map((val, i) => {
+            const x = (i / Math.max(1, lats.length - 1)) * w;
+            const y = h - ((val - minL) / range) * (h - 10) - 5;
+            return `${x},${y}`;
+        }).join(" ");
+        
+        const polyline = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+        polyline.setAttribute("points", points);
+        polyline.setAttribute("fill", "none");
+        polyline.setAttribute("stroke", "var(--primary)");
+        polyline.setAttribute("stroke-width", "2");
+        polyline.setAttribute("stroke-linecap", "round");
+        polyline.setAttribute("stroke-linejoin", "round");
+        
+        svg.appendChild(polyline);
+        row.appendChild(svg);
+        sparkContainer.appendChild(row);
+      }
+      if (hasData) panel.appendChild(sparkContainer);
+    }
+
+    // 3. Event log
+    if (eventsData && eventsData.events && eventsData.events.length > 0) {
+        const tableWrap = el("div", { className: "glass-card-static", style: { overflowX: "auto", maxHeight: "400px" } });
+        const table = el("table", { className: "obs-event-table" });
+        table.innerHTML = `
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>Route</th>
+                    <th>Backend</th>
+                    <th>Model</th>
+                    <th>Privacy</th>
+                    <th>Latency</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        `;
+        const tbody = table.querySelector("tbody");
+        for (const ev of eventsData.events) {
+            const tr = el("tr");
+            if (ev.status === "error") tr.classList.add("status-error");
+            else if (ev.fallback_used) tr.classList.add("fallback-used");
+
+            let timeStr = "";
+            try {
+                const d = new Date(ev.timestamp);
+                timeStr = formatTime(d);
+            } catch (e) {
+                timeStr = ev.timestamp;
+            }
+
+            const streamBadge = ev.stream || ev.error_code === "stream" ? `<span class="badge badge--stream">[stream]</span>` : "";
+            const statusIcon = ev.status === "success" ? "✓" : "✗";
+            
+            tr.innerHTML = `
+                <td class="mono">\${timeStr}</td>
+                <td>\${escapeHtml(ev.route)}</td>
+                <td>\${escapeHtml(ev.backend)}</td>
+                <td>\${escapeHtml(ev.model)}</td>
+                <td>\${escapeHtml(ev.privacy)}</td>
+                <td class="mono">\${ev.latency_ms != null ? ev.latency_ms + "ms" : "—"}</td>
+                <td>\${statusIcon} \${streamBadge}</td>
+            `;
+            tbody.appendChild(tr);
+        }
+        tableWrap.appendChild(table);
+        panel.appendChild(tableWrap);
+    }
+  }
+
+  // ── Layout Manager ──
+  const ALL_WIDGETS = [
+    { id: "widget-fleet", title: "Fleet Overview", icon: "🖥" },
+    { id: "widget-spider", title: "Capability Radar", icon: "🕸" },
+    { id: "widget-routing", title: "Routing Map", icon: "🔀" },
+    { id: "widget-observability", title: "Observability Logs", icon: "📊" },
+    { id: "widget-architecture", title: "Architecture Diagram", icon: "🏗" },
+    { id: "widget-diagnostics", title: "Gateway Diagnostics", icon: "📍" }
+  ];
+
+  function initLayoutManager() {
+    let pinned = [];
+    try {
+      const stored = localStorage.getItem("dashboard_widgets");
+      if (stored) pinned = JSON.parse(stored);
+      else pinned = ["widget-fleet", "widget-spider", "widget-observability", "widget-routing"];
+    } catch (e) {
+      pinned = ["widget-fleet", "widget-spider", "widget-observability", "widget-routing"];
+    }
+
+    let navPos = localStorage.getItem("nav_position") || "nav-left";
+
+    function applyDocking() {
+      dom.appContainer.className = navPos;
+      dom.btnDockLayout.innerHTML = `<span class="icon">🔄</span> Dock: ${navPos.replace('nav-', '').toUpperCase()}`;
+    }
+
+    function applyWidgets() {
+      const allWidgets = Array.from(document.querySelectorAll(".widget"));
+      allWidgets.forEach(w => w.classList.add("hidden"));
+      pinned.forEach((id, index) => {
+        const w = document.getElementById(id);
+        if (w) {
+          w.classList.remove("hidden");
+          w.style.order = index;
+        }
+      });
+      localStorage.setItem("dashboard_widgets", JSON.stringify(pinned));
+    }
+
+    applyDocking();
+    applyWidgets();
+
+    dom.btnDockLayout.addEventListener("click", () => {
+      if (navPos === "nav-left") navPos = "nav-top";
+      else if (navPos === "nav-top") navPos = "nav-right";
+      else navPos = "nav-left";
+      localStorage.setItem("nav_position", navPos);
+      applyDocking();
+    });
+
+    dom.btnAddWidget.addEventListener("click", () => {
+      dom.widgetGallery.innerHTML = "";
+      ALL_WIDGETS.forEach(w => {
+        const isPinned = pinned.includes(w.id);
+        const item = el("div", { className: `widget-gallery-item ${isPinned ? "pinned" : ""}` },
+          el("span", { className: "icon" }, w.icon),
+          el("div", { className: "title" }, w.title)
+        );
+        item.addEventListener("click", () => {
+          if (pinned.includes(w.id)) {
+            pinned = pinned.filter(id => id !== w.id);
+            item.classList.remove("pinned");
+          } else {
+            pinned.push(w.id);
+            item.classList.add("pinned");
+          }
+          applyWidgets();
+        });
+        dom.widgetGallery.appendChild(item);
+      });
+      dom.widgetModal.classList.remove("hidden");
+    });
+
+    dom.btnCloseModal.addEventListener("click", () => dom.widgetModal.classList.add("hidden"));
+
+    document.querySelectorAll(".btn-remove-widget").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const id = btn.getAttribute("data-target");
+        pinned = pinned.filter(p => p !== id);
+        applyWidgets();
+      });
+    });
+  }
+
+  // ── Radar Chart ──
+  function drawRadarChart(machinesObj) {
+    if (!dom.spiderPanel) return;
+    if (!machinesObj || Object.keys(machinesObj).length === 0) {
+      dom.spiderPanel.innerHTML = '<div class="empty-state text-dim">Waiting for node data...</div>';
+      return;
+    }
+
+    const mKeys = Object.keys(machinesObj);
+    const numAxes = 5;
+    const axes = ["Compute", "Memory", "Speed", "IOPS", "Network"];
+    const w = 300, h = 300;
+    const cx = w/2, cy = h/2;
+    const radius = 90;
+
+    let svgStr = `<svg viewBox="0 0 ${w} ${h}" width="100%" height="100%" style="overflow:visible">`;
+    
+    // Grid polygons
+    for (let level=1; level<=4; level++) {
+        const r = radius * (level/4);
+        let pts = [];
+        for (let i=0; i<numAxes; i++) {
+            const angle = (Math.PI*2 * i)/numAxes - Math.PI/2;
+            pts.push(`${cx + r*Math.cos(angle)},${cy + r*Math.sin(angle)}`);
+        }
+        svgStr += `<polygon points="${pts.join(" ")}" fill="none" stroke="rgba(255,255,255,0.1)" />`;
+    }
+    
+    // Axes and Labels
+    for (let i=0; i<numAxes; i++) {
+        const angle = (Math.PI*2 * i)/numAxes - Math.PI/2;
+        const lx = cx + radius*Math.cos(angle);
+        const ly = cy + radius*Math.sin(angle);
+        svgStr += `<line x1="${cx}" y1="${cy}" x2="${lx}" y2="${ly}" stroke="rgba(255,255,255,0.2)" />`;
+        
+        const tx = cx + (radius+25)*Math.cos(angle);
+        const ty = cy + (radius+25)*Math.sin(angle);
+        svgStr += `<text x="${tx}" y="${ty}" fill="var(--text-dim)" font-size="11" font-family="var(--font-mono)" text-anchor="middle" dominant-baseline="middle">${axes[i]}</text>`;
+    }
+
+    // Machine Polygons
+    const colors = ["#00d4ff", "#7c3aed", "#22c55e", "#f59e0b"];
+    let colorIdx = 0;
+    let legendStr = `<div style="display:flex; justify-content:center; gap:1rem; margin-top:1rem; flex-wrap:wrap">`;
+
+    for (const key of mKeys) {
+        const m = machinesObj[key];
+        const sys = m.sys_info;
+        if (!sys) continue;
+        
+        const computeScore = sys.gpu_count > 0 ? 0.9 : (sys.cpu_cores / 16);
+        const memoryScore = sys.total_ram_gb / 64;
+        const speedScore = m.status === 'online' ? 0.8 : 0.2;
+        const iopsScore = sys.os.includes("macOS") ? 0.8 : 0.6;
+        const netScore = 0.7;
+
+        const scores = [
+            Math.min(1, Math.max(0.1, computeScore)),
+            Math.min(1, Math.max(0.1, memoryScore)),
+            Math.min(1, Math.max(0.1, speedScore)),
+            Math.min(1, Math.max(0.1, iopsScore)),
+            Math.min(1, Math.max(0.1, netScore))
+        ];
+
+        let pts = [];
+        for (let i=0; i<numAxes; i++) {
+            const angle = (Math.PI*2 * i)/numAxes - Math.PI/2;
+            const r = radius * scores[i];
+            pts.push(`${cx + r*Math.cos(angle)},${cy + r*Math.sin(angle)}`);
+        }
+        
+        const color = colors[colorIdx % colors.length];
+        svgStr += `<polygon points="${pts.join(" ")}" fill="${color}33" stroke="${color}" stroke-width="2" style="filter: drop-shadow(0 0 8px ${color}80);" />`;
+        
+        legendStr += `<div style="display:flex; align-items:center; gap:6px; font-size:0.85rem; color:var(--text)"><span style="display:inline-block;width:10px;height:10px;background:${color};border-radius:50%;box-shadow:0 0 5px ${color}"></span>${humanName(key)}</div>`;
+        colorIdx++;
+    }
+    
+    svgStr += `</svg>`;
+    dom.spiderPanel.innerHTML = `<div style="display:flex; flex-direction:column; align-items:center; width:100%; height:100%">
+        <div style="flex:1; width:100%; display:flex; align-items:center; justify-content:center; min-height: 250px">${svgStr}</div>
+        ${legendStr}</div>
+    </div>`;
+  }
+
   // ── Init ──
 
   function init() {
+    initLayoutManager();
+
     // Auto-refresh toggle
-    dom.autoRefreshToggle.addEventListener("change", (e) => {
-      if (e.target.checked) {
-        startAutoRefresh();
-      } else {
-        stopAutoRefresh();
-      }
-    });
+    if (dom.autoRefreshToggle) {
+      dom.autoRefreshToggle.addEventListener("change", (e) => {
+        if (e.target.checked) startAutoRefresh();
+        else stopAutoRefresh();
+      });
+    }
 
     // Manual refresh
-    dom.refreshBtn.addEventListener("click", fetchAll);
+    if (dom.refreshBtn) {
+      dom.refreshBtn.addEventListener("click", fetchAll);
+    }
 
     // Initial fetch
     fetchAll();

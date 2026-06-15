@@ -36,7 +36,8 @@ def log_routing_decision(
     status: str = "success", 
     error: str = None,
     ttft_ms: Optional[int] = None,
-    latency_ms: Optional[int] = None
+    latency_ms: Optional[int] = None,
+    stream: bool = False
 ):
     """Logs a routing decision metadata event."""
     event = {
@@ -50,7 +51,8 @@ def log_routing_decision(
         "latency_ms": latency_ms,
         "fallback_used": fallback_used,
         "status": status,
-        "error_code": error
+        "error_code": error,
+        "stream": stream
     }
     
     print(f"[TELEMETRY] {event}")

@@ -9,7 +9,7 @@ client = TestClient(app)
 @respx.mock
 def test_backend_health_returns_structured_status():
     # Mock PC is up
-    respx.get("http://pc-ai.local:11434/api/tags").mock(
+    respx.get("http://desktop-homepc.local:11434/api/tags").mock(
         return_value=httpx.Response(200, json={"models": [{"name": "qwen2.5-coder:7b"}]})
     )
     # Mock Mac is down

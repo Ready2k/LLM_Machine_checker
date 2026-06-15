@@ -3,86 +3,148 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Local AI Fabric — Admin dashboard for managing a federated local AI inference fleet. Monitor machine health, routing, benchmarks, and runtime readiness.">
+  <meta name="description" content="Local AI Fabric — Admin dashboard for managing a federated local AI inference fleet.">
   <meta name="theme-color" content="#0a0e1a">
-  <title>Local AI Fabric — Dashboard</title>
+  <title>Local AI Fabric — Command Center</title>
   <link rel="stylesheet" href="/static/css/style.css">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
 </head>
 <body>
 
-<main class="dashboard" id="app">
-
-  <!-- ============ HEADER ============ -->
-  <header class="header fade-in" id="header">
-    <div class="header-brand">
+<div id="app-container" class="nav-left">
+  
+  <!-- ============ SIDEBAR NAVIGATION ============ -->
+  <nav id="sidebar" class="sidebar glass-card-static">
+    <div class="sidebar-brand">
       <span class="status-dot status-dot--healthy" id="system-status-dot" title="System healthy"></span>
-      <h1>Local AI Fabric</h1>
-      <span class="version-tag">v0.1.0</span>
+      <h1 class="brand-text">NexAI Fabric</h1>
+      <span class="version-tag brand-text">v0.2.0</span>
+      <button class="btn-collapse" id="btn-collapse-sidebar" title="Toggle Sidebar">◀</button>
     </div>
-    <div class="header-controls">
-      <span class="refresh-info" id="last-refresh">—</span>
-      <div class="toggle-wrap">
-        <label class="toggle-switch" title="Auto-refresh every 30s">
-          <input type="checkbox" id="auto-refresh-toggle">
-          <span class="toggle-slider"></span>
-        </label>
-        <span>Auto-refresh</span>
+    
+    <div class="sidebar-menu">
+      <div class="menu-group">
+        <a href="#" class="nav-btn active"><span class="icon">🎛</span> <span class="label">Dashboard</span></a>
+        <a href="#" class="nav-btn"><span class="icon">🖥</span> <span class="label">Nodes</span></a>
+        <a href="#" class="nav-btn"><span class="icon">🔀</span> <span class="label">Routes</span></a>
+        <a href="#" class="nav-btn"><span class="icon">📊</span> <span class="label">Metrics</span></a>
+        <a href="#" class="nav-btn"><span class="icon">⚙️</span> <span class="label">Settings</span></a>
       </div>
-      <button class="btn" id="refresh-btn" title="Refresh now">🔄 Refresh</button>
-    </div>
-  </header>
+      
+      <div class="menu-divider"></div>
 
-  <!-- ============ FLEET OVERVIEW ============ -->
-  <section class="fade-in" id="fleet-section">
-    <h2 class="section-title"><span class="icon">🖥</span> Fleet Overview</h2>
-    <div class="fleet-grid" id="fleet-grid">
-      <!-- Machine cards rendered by JS -->
-      <div class="glass-card-static empty-state" id="fleet-loading">
-        <div class="skeleton skeleton--line" style="width:60%;margin:0 auto"></div>
-        <div class="skeleton skeleton--line" style="width:40%;margin:0 auto"></div>
-        <div class="skeleton skeleton--line" style="width:50%;margin:0 auto"></div>
-      </div>
+      <button class="nav-btn primary-glow" id="btn-add-widget"><span class="icon">➕</span> <span class="label">Add Widget</span></button>
     </div>
-  </section>
-
-  <!-- ============ THIS MACHINE ============ -->
-  <section class="fade-in" id="profile-section">
-    <h2 class="section-title"><span class="icon">📍</span> This Machine</h2>
-    <div class="glass-card-static this-machine" id="profile-panel">
-      <div class="empty-state" id="profile-loading">
-        <div class="spinner" style="margin:0 auto 0.5rem"></div>
-        <p class="text-muted">Loading profile…</p>
+    
+    <div class="sidebar-footer">
+      <div class="sidebar-controls">
+        <span class="refresh-info mono text-dim label" id="last-refresh">—</span>
+        <div class="toggle-wrap">
+          <label class="toggle-switch" title="Auto-refresh every 30s">
+            <input type="checkbox" id="auto-refresh-toggle">
+            <span class="toggle-slider"></span>
+          </label>
+          <span class="text-dim label" style="font-size:0.8rem">Auto-refresh</span>
+        </div>
+        <button class="btn btn-sm" id="refresh-btn" title="Refresh now"><span class="icon">🔄</span> <span class="label">Refresh</span></button>
       </div>
     </div>
-  </section>
+  </nav>
 
-  <!-- ============ ROUTING MAP ============ -->
-  <section class="fade-in" id="routing-section">
-    <h2 class="section-title"><span class="icon">🔀</span> Routing Map</h2>
-    <div class="route-cards-grid" id="routing-grid">
-      <div class="glass-card-static empty-state" id="routing-loading">
-        <div class="skeleton skeleton--line" style="width:50%;margin:0 auto"></div>
-        <div class="skeleton skeleton--line" style="width:35%;margin:0 auto"></div>
+  <!-- ============ MAIN CONTENT ============ -->
+  <main id="main-content" class="dashboard">
+    <div id="dashboard-grid" class="widget-grid">
+
+      <!-- WIDGET: Fleet Overview -->
+      <div class="widget fade-in" id="widget-fleet" data-widget-title="Fleet Overview" data-widget-icon="🖥">
+        <div class="widget-header">
+          <h2 class="section-title"><span class="icon">🖥</span> Fleet Overview</h2>
+          <button class="btn-remove-widget" data-target="widget-fleet" title="Remove Widget">✕</button>
+        </div>
+        <div class="fleet-grid" id="fleet-grid">
+          <div class="glass-card-static empty-state" id="fleet-loading">
+            <div class="skeleton skeleton--line" style="width:60%;margin:0 auto"></div>
+            <div class="skeleton skeleton--line" style="width:40%;margin:0 auto"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- WIDGET: Spider Graph (Capability Radar) -->
+      <div class="widget fade-in" id="widget-spider" data-widget-title="Capability Radar" data-widget-icon="🕸">
+        <div class="widget-header">
+          <h2 class="section-title"><span class="icon">🕸</span> Capability Radar</h2>
+          <button class="btn-remove-widget" data-target="widget-spider" title="Remove Widget">✕</button>
+        </div>
+        <div class="glass-card-static radar-container" id="spider-panel" style="min-height: 300px; display: flex; align-items: center; justify-content: center;">
+           <div class="empty-state text-dim">Waiting for node data...</div>
+        </div>
+      </div>
+
+      <!-- WIDGET: Routing Map -->
+      <div class="widget fade-in" id="widget-routing" data-widget-title="Routing Map" data-widget-icon="🔀">
+        <div class="widget-header">
+          <h2 class="section-title"><span class="icon">🔀</span> Routing Map</h2>
+          <button class="btn-remove-widget" data-target="widget-routing" title="Remove Widget">✕</button>
+        </div>
+        <div class="route-cards-grid" id="routing-grid">
+          <div class="glass-card-static empty-state" id="routing-loading">
+            <div class="skeleton skeleton--line" style="width:50%;margin:0 auto"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- WIDGET: Observability Logs -->
+      <div class="widget fade-in" id="widget-observability" data-widget-title="Observability Logs" data-widget-icon="📊">
+        <div class="widget-header">
+          <h2 class="section-title"><span class="icon">📊</span> Observability</h2>
+          <button class="btn-remove-widget" data-target="widget-observability" title="Remove Widget">✕</button>
+        </div>
+        <div id="observability-panel">
+            <div class="glass-card-static empty-state text-dim">Waiting for telemetry...</div>
+        </div>
+      </div>
+
+      <!-- WIDGET: Architecture Diagram -->
+      <div class="widget fade-in" id="widget-architecture" data-widget-title="Architecture Diagram" data-widget-icon="🏗">
+        <div class="widget-header">
+          <h2 class="section-title"><span class="icon">🏗</span> Architecture</h2>
+          <button class="btn-remove-widget" data-target="widget-architecture" title="Remove Widget">✕</button>
+        </div>
+        <div class="glass-card-static" id="arch-panel"></div>
+      </div>
+
+      <!-- WIDGET: Gateway Diagnostics -->
+      <div class="widget fade-in" id="widget-diagnostics" data-widget-title="Gateway Diagnostics" data-widget-icon="📍">
+        <div class="widget-header">
+          <h2 class="section-title"><span class="icon">📍</span> Gateway Diagnostics</h2>
+          <button class="btn-remove-widget" data-target="widget-diagnostics" title="Remove Widget">✕</button>
+        </div>
+        <div class="glass-card-static this-machine" id="profile-panel">
+          <div class="empty-state" id="profile-loading">
+            <div class="spinner" style="margin:0 auto 0.5rem"></div>
+            <p class="text-muted">Loading profile…</p>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- ============ WIDGET CUSTOMIZATION MODAL ============ -->
+  <div id="widget-modal" class="modal-overlay hidden">
+    <div class="modal-content glass-card-static">
+      <div class="modal-header">
+        <h2><span class="icon">⚙️</span> Customize Dashboard</h2>
+        <button class="btn-close" id="btn-close-modal" title="Close">✕</button>
+      </div>
+      <p class="text-dim" style="margin-bottom: 1rem; font-size: 0.9rem;">Select widgets to pin to your dashboard view.</p>
+      <div class="widget-gallery" id="widget-gallery">
+        <!-- Rendered by JS -->
       </div>
     </div>
-  </section>
+  </div>
 
-  <!-- ============ ARCHITECTURE DIAGRAM ============ -->
-  <section class="fade-in" id="arch-section">
-    <h2 class="section-title"><span class="icon">🏗</span> Architecture</h2>
-    <div class="glass-card-static" id="arch-panel">
-      <!-- Rendered by JS -->
-    </div>
-  </section>
-
-  <!-- ============ FOOTER ============ -->
-  <footer class="footer fade-in">
-    <p>Local AI Fabric v0.1.0 · <a href="docs/LOCAL_AI_FABRIC_SPEC.md">Spec</a> · <a href="docs/WEB_DASHBOARD_IMPLEMENTATION_PLAN.md">Plan</a></p>
-    <p id="footer-refresh" class="text-dim" style="margin-top:0.25rem">—</p>
-  </footer>
-
-</main>
+</div>
 
 <script src="/static/js/app.js"></script>
 </body>

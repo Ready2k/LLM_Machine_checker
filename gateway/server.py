@@ -16,7 +16,7 @@ from typing import Any, Optional
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException, Header, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -26,7 +26,8 @@ from gateway.providers.lmstudio import LMStudioProvider
 from gateway.providers.openai_compatible import OpenAICompatibleProvider
 from gateway.policy.privacy import extract_privacy_level, is_privacy_allowed, can_fallback_to_cloud
 from gateway.policy.routing import resolve_model_to_route, select_backend
-from gateway.telemetry.events import log_routing_decision
+from gateway.policy.autoroute import select_auto_route
+from gateway.telemetry.events import log_routing_decision, _load_telemetry_config
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -408,6 +409,135 @@ async def run_profile():
     return ProfileRunResponse(status="ok", profile=profile_data)
 
 
+@app.get("/api/events")
+async def get_events(limit: int = 100, status: str = "all"):
+    """Return the latest telemetry events from the JSONL log."""
+    limit = min(max(1, limit), 500)
+    config = _load_telemetry_config()
+    log_path_str = config.get("path", "data/telemetry/gateway-events.jsonl")
+    log_path = PROJECT_ROOT / log_path_str
+
+    if not log_path.exists():
+        return {"events": [], "total_on_disk": 0, "returned": 0}
+
+    events = []
+    total = 0
+    try:
+        with open(log_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                    total += 1
+                    if status != "all" and event.get("status") != status:
+                        continue
+                    events.append(event)
+                except json.JSONDecodeError:
+                    pass
+    except OSError:
+        pass
+
+    events.reverse()
+    returned_events = events[:limit]
+    
+    return {
+        "events": returned_events,
+        "total_on_disk": total,
+        "returned": len(returned_events)
+    }
+
+@app.get("/api/stats")
+async def get_stats():
+    """Return aggregate statistics from the telemetry log."""
+    config = _load_telemetry_config()
+    log_path_str = config.get("path", "data/telemetry/gateway-events.jsonl")
+    log_path = PROJECT_ROOT / log_path_str
+
+    stats = {
+        "total_requests": 0,
+        "success_rate_pct": 0.0,
+        "error_count": 0,
+        "fallback_count": 0,
+        "fallback_rate_pct": 0.0,
+        "requests_by_route": {},
+        "requests_by_backend": {},
+        "avg_latency_ms_by_backend": {},
+        "p95_latency_ms_by_backend": {},
+        "privacy_breakdown": {},
+        "stream_count": 0,
+        "period_start": None,
+        "period_end": None
+    }
+
+    if not log_path.exists():
+        return stats
+
+    success_count = 0
+    latencies_by_backend = {}
+    
+    try:
+        with open(log_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                    stats["total_requests"] += 1
+                    
+                    if not stats["period_start"]:
+                        stats["period_start"] = event.get("timestamp")
+                    stats["period_end"] = event.get("timestamp")
+                    
+                    if event.get("status") == "success":
+                        success_count += 1
+                    else:
+                        stats["error_count"] += 1
+                        
+                    if event.get("fallback_used"):
+                        stats["fallback_count"] += 1
+                        
+                    route = event.get("route", "unknown")
+                    stats["requests_by_route"][route] = stats["requests_by_route"].get(route, 0) + 1
+                    
+                    backend = event.get("backend", "unknown")
+                    stats["requests_by_backend"][backend] = stats["requests_by_backend"].get(backend, 0) + 1
+                    
+                    privacy = event.get("privacy", "unknown")
+                    stats["privacy_breakdown"][privacy] = stats["privacy_breakdown"].get(privacy, 0) + 1
+                    
+                    if event.get("stream"):
+                        stats["stream_count"] += 1
+                        
+                    lat = event.get("latency_ms")
+                    if lat is not None:
+                        if backend not in latencies_by_backend:
+                            latencies_by_backend[backend] = []
+                        latencies_by_backend[backend].append(lat)
+                        
+                except json.JSONDecodeError:
+                    pass
+    except OSError:
+        pass
+
+    if stats["total_requests"] > 0:
+        stats["success_rate_pct"] = round((success_count / stats["total_requests"]) * 100, 1)
+        stats["fallback_rate_pct"] = round((stats["fallback_count"] / stats["total_requests"]) * 100, 1)
+
+    for backend, lats in latencies_by_backend.items():
+        if lats:
+            stats["avg_latency_ms_by_backend"][backend] = int(sum(lats) / len(lats))
+            lats.sort()
+            idx = int(len(lats) * 0.95)
+            if idx >= len(lats):
+                idx = len(lats) - 1
+            stats["p95_latency_ms_by_backend"][backend] = lats[idx]
+
+    return stats
+
+
 @app.get("/api/backends/health")
 async def get_backends_health():
     backends_config = load_backends_config()
@@ -497,8 +627,7 @@ async def get_v1_models():
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: ChatCompletionRequest, x_ai_privacy: Optional[str] = Header(None)):
-    if request.stream:
-        raise HTTPException(status_code=400, detail={"message": "Streaming not supported yet", "type": "stream_disabled", "code": "invalid_request"})
+    pass  # streaming handled below
 
     models_config = load_models_config()
     routes_data = load_routes_config()
@@ -509,7 +638,13 @@ async def chat_completions(request: ChatCompletionRequest, x_ai_privacy: Optiona
     # 1. Privacy
     privacy_level = extract_privacy_level(request.metadata, x_ai_privacy, security_config.get("default_privacy", "personal"))
 
-    # 2. Resolve Model -> Route
+    # 2. Auto-routing: inspect prompt and pick best route automatically
+    auto_reason = None
+    if request.model == "auto":
+        auto_route, auto_reason = select_auto_route(request.messages, privacy_level)
+        request = request.model_copy(update={"model": auto_route})
+
+    # 3. Resolve Model -> Route
     route_name, route_config = resolve_model_to_route(request.model, models_config, routes_config)
 
     # 3. Apply Privacy Policy
@@ -538,16 +673,6 @@ async def chat_completions(request: ChatCompletionRequest, x_ai_privacy: Optiona
     if request.model in models_config.get("models", {}):
         target_model_name = models_config["models"][request.model].get("model", request.model)
 
-    try:
-        response = await provider.chat_completions(request, target_model_name)
-    except Exception as e:
-        log_routing_decision(route_name, request.model, privacy_level, backend_id, fallback_used, "error", str(e))
-        raise HTTPException(status_code=502, detail={"message": f"Backend {backend_id} failed: {str(e)}", "type": "backend_error", "code": "bad_gateway"})
-
-    # Log success
-    log_routing_decision(route_name, request.model, privacy_level, backend_id, fallback_used, "success")
-
-    # Add headers
     headers = {
         "x-ai-route": route_name,
         "x-ai-backend": backend_id,
@@ -555,7 +680,26 @@ async def chat_completions(request: ChatCompletionRequest, x_ai_privacy: Optiona
         "x-ai-fallback-used": str(fallback_used).lower(),
         "x-ai-policy": privacy_level
     }
-    
+
+    if auto_reason:
+        headers["x-ai-auto-reason"] = auto_reason
+
+    if request.stream:
+        log_routing_decision(route_name, request.model, privacy_level, backend_id, fallback_used, "success", error=auto_reason, latency_ms=None, stream=True)
+        stream_gen = provider.chat_completions_stream(request, target_model_name)
+        return StreamingResponse(stream_gen, media_type="text/event-stream", headers=headers)
+
+    import time
+    start_time = time.time()
+    try:
+        response = await provider.chat_completions(request, target_model_name)
+    except Exception as e:
+        latency_ms = int((time.time() - start_time) * 1000)
+        log_routing_decision(route_name, request.model, privacy_level, backend_id, fallback_used, "error", str(e), latency_ms=latency_ms)
+        raise HTTPException(status_code=502, detail={"message": f"Backend {backend_id} failed: {str(e)}", "type": "backend_error", "code": "bad_gateway"})
+
+    latency_ms = int((time.time() - start_time) * 1000)
+    log_routing_decision(route_name, request.model, privacy_level, backend_id, fallback_used, "success", error=auto_reason, latency_ms=latency_ms)
     return JSONResponse(content=response.model_dump(), headers=headers)
 
 class RouteTestRequest(BaseModel):
