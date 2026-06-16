@@ -4,6 +4,7 @@
 # Script to start, stop, and test the Local AI Fabric gateway
 
 PID_FILE=".gateway.pid"
+AGENT_PID_FILE=".agent.pid"
 
 start() {
     if [ -f "$PID_FILE" ]; then
@@ -36,6 +37,15 @@ start() {
     PID=$!
     echo $PID > "$PID_FILE"
 
+    echo "Starting Local Node Agent..."
+    if [ -d ".venv" ]; then
+        .venv/bin/python node_agent/agent.py > /dev/null 2>&1 &
+    else
+        python3 node_agent/agent.py > /dev/null 2>&1 &
+    fi
+    AGENT_PID=$!
+    echo $AGENT_PID > "$AGENT_PID_FILE"
+
     # Best-effort LAN IP for convenience (macOS, then Linux/Pi)
     LAN_IP=""
     if command -v ipconfig >/dev/null 2>&1; then
@@ -67,6 +77,20 @@ stop() {
         # Fallback to pkill if necessary
         if pkill -f "gateway\.server"; then
             echo "Killed orphaned processes."
+        fi
+    fi
+
+    if [ -f "$AGENT_PID_FILE" ]; then
+        AGENT_PID=$(cat "$AGENT_PID_FILE")
+        echo "Stopping Node Agent (PID: $AGENT_PID)..."
+        kill "$AGENT_PID" 2>/dev/null
+        rm "$AGENT_PID_FILE"
+        echo "Node Agent stopped."
+    else
+        echo "Node Agent is not running (no PID file found)."
+        # Fallback to pkill if necessary
+        if pkill -f "node_agent/agent.py"; then
+            echo "Killed orphaned agent processes."
         fi
     fi
 }

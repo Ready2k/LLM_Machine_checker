@@ -845,6 +845,9 @@ async def embeddings(request: Request):
 @app.post("/v1/chat/completions")
 async def chat_completions(request: ChatCompletionRequest, x_ai_privacy: Optional[str] = Header(None)):
     correlation_id = str(uuid.uuid4())
+    if not request.metadata:
+        request.metadata = {}
+    request.metadata["correlation_id"] = correlation_id
     log_llm_event(correlation_id, "request.received", f"Received chat completion request for {request.model}")
     pass  # streaming handled below
 

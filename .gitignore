@@ -49,3 +49,4 @@ certs/
 *.crt
 *.key
 *.pem
+.agent.pid

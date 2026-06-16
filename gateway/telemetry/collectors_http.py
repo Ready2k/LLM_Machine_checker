@@ -19,7 +19,7 @@ class HttpAgentCollector(LogCollector):
             params["grep"] = grep
             
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(verify=False) as client:
                 resp = await client.get(
                     f"{self.base_url}/logs",
                     headers=self.headers,
@@ -35,7 +35,7 @@ class HttpAgentCollector(LogCollector):
 
     async def get_diagnostics(self) -> Dict[str, Any]:
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(verify=False) as client:
                 resp = await client.get(
                     f"{self.base_url}/diagnostics/gpu",
                     headers=self.headers,

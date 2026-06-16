@@ -73,6 +73,8 @@ class OpenAICompatibleProvider(Provider):
             "messages": request.messages,
             "stream": True,
         }
+        if request.metadata and request.metadata.get("correlation_id"):
+            payload["user"] = request.metadata["correlation_id"]
         if request.temperature is not None:
             payload["temperature"] = request.temperature
         if request.max_tokens is not None:
@@ -94,6 +96,8 @@ class OpenAICompatibleProvider(Provider):
             "messages": request.messages,
             "stream": request.stream
         }
+        if request.metadata and request.metadata.get("correlation_id"):
+            payload["user"] = request.metadata["correlation_id"]
         if request.temperature is not None:
             payload["temperature"] = request.temperature
         if request.max_tokens is not None:

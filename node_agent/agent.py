@@ -37,14 +37,25 @@ def _get_ollama_log_path() -> Optional[str]:
     return None
 
 def _get_lmstudio_log_path() -> Optional[str]:
+    log_dirs = []
     if os.name == "nt":
         local_app_data = os.getenv("LOCALAPPDATA")
         if local_app_data:
-            return os.path.join(local_app_data, "lm-studio", "log", "lms-server.log")
+            log_dirs.append(os.path.join(local_app_data, "lm-studio", "log"))
+            log_dirs.append(os.path.join(os.path.expanduser("~"), ".lmstudio", "server-logs"))
     else:
-        # On Mac, LM studio logs are in ~/.cache/lm-studio/log/
-        # There might be multiple, but we'll try lms-server.log or server.log
-        return os.path.expanduser("~/.cache/lm-studio/log/lms-server.log")
+        log_dirs.append(os.path.expanduser("~/.cache/lm-studio/log"))
+        log_dirs.append(os.path.expanduser("~/.lmstudio/server-logs"))
+        
+    for log_dir in log_dirs:
+        if os.path.exists(log_dir):
+            log_files = []
+            for root, _, files in os.walk(log_dir):
+                for f in files:
+                    if f.endswith(".log"):
+                        log_files.append(os.path.join(root, f))
+            if log_files:
+                return max(log_files, key=os.path.getmtime)
     return None
 
 @app.get("/logs")
@@ -69,12 +80,16 @@ async def get_logs(
     try:
         # Simple tail implementation
         with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
-            # Read all lines (inefficient for massive files, but ok for daily rolling logs)
-            # In a production agent, we'd seek from the end.
             content = f.readlines()
             
             if grep:
-                content = [line for line in content if grep in line]
+                filtered = []
+                for i, line in enumerate(content):
+                    if grep in line:
+                        start = max(0, i - 15)
+                        end = min(len(content), i + 35)
+                        filtered.extend(content[start:end])
+                content = filtered
                 
             tail = content[-lines:]
             return {"source": source, "lines": tail}

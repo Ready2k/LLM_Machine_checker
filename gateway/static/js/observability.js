@@ -152,9 +152,72 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (logsRes.ok) {
                     const logsData = await logsRes.json();
                     if (logsData.logs && logsData.logs.length > 0) {
-                        logsContainer.innerHTML = '<pre style="background: var(--bg-1); padding: 1rem; border-radius: var(--radius-sm); overflow-x: auto; font-size: 0.8rem; color: var(--text-dim); margin: 0; white-space: pre-wrap; word-break: break-all;">' + 
-                            logsData.logs.map(l => l.replace(/</g, "&lt;").replace(/>/g, "&gt;").trim()).filter(l => l.length > 0).join('\\n') + 
-                            '</pre>';
+                        const parsedLogs = [];
+                        let currentLog = null;
+                        for (const line of logsData.logs) {
+                            if (!line.trim() && !currentLog) continue;
+                            
+                            // Match LM Studio main logs: [YYYY-MM-DD HH:MM:SS][LEVEL] or [YYYY-MM-DD HH:MM:SS][LEVEL][MODULE]
+                            const bracketRegex = /^\[(.*?)\]\[(.*?)\](?:\[(.*?)\])?\s(.*)/;
+                            // Match Llama.cpp internal logs: 1131.47.835.730 I slot get_availabl: ...
+                            const llamaRegex = /^[0-9\.]+\s+([A-Z])\s+([a-zA-Z_]+)\s+([a-zA-Z_:]+)\s*(.*)/;
+                            
+                            let match = line.match(bracketRegex);
+                            if (match) {
+                                if (currentLog) parsedLogs.push(currentLog);
+                                currentLog = {
+                                    timestamp: match[1],
+                                    level: match[2],
+                                    module: match[3] || 'system',
+                                    message: match[4]
+                                };
+                                continue;
+                            }
+                            
+                            match = line.match(llamaRegex);
+                            if (match) {
+                                if (currentLog) parsedLogs.push(currentLog);
+                                const levelMap = {'I': 'INFO', 'W': 'WARN', 'E': 'ERROR', 'D': 'DEBUG'};
+                                currentLog = {
+                                    timestamp: '', 
+                                    level: levelMap[match[1]] || match[1],
+                                    module: match[2],
+                                    message: match[3] + ' ' + match[4]
+                                };
+                                continue;
+                            }
+                            
+                            if (currentLog) {
+                                currentLog.message += '\\n' + line;
+                            } else {
+                                currentLog = { timestamp: '', level: 'RAW', module: 'unknown', message: line };
+                            }
+                        }
+                        if (currentLog) parsedLogs.push(currentLog);
+                        
+                        const getLevelColor = (level) => {
+                            if (level.includes('INFO')) return 'var(--primary)';
+                            if (level.includes('WARN')) return 'var(--warning)';
+                            if (level.includes('ERR')) return 'var(--danger)';
+                            if (level.includes('DEBUG')) return '#a855f7'; // purple
+                            return 'var(--text-dim)';
+                        };
+
+                        const htmlLogs = parsedLogs.map(log => {
+                            const timeStr = log.timestamp ? `<span style="color: var(--text-dim)">${log.timestamp.split(' ').pop()}</span>` : '';
+                            const lvlStr = `<span style="color: ${getLevelColor(log.level)}; font-weight: bold; min-width: 45px; display: inline-block;">${log.level}</span>`;
+                            const modStr = `<span style="color: var(--text-dim); background: var(--bg-1); padding: 0 4px; border-radius: 4px; font-size: 0.75rem;">${log.module}</span>`;
+                            const msgStr = log.message.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                            
+                            return `<div style="margin-bottom: 0.75rem; font-family: monospace; font-size: 0.8rem; line-height: 1.4;">
+                                <div style="display: flex; gap: 0.5rem; align-items: baseline; margin-bottom: 0.25rem;">
+                                    ${timeStr} ${lvlStr} ${modStr}
+                                </div>
+                                <div style="white-space: pre-wrap; word-break: break-all; color: var(--text); padding-left: 0.75rem; border-left: 2px solid var(--border); margin-left: 0.25rem;">${msgStr}</div>
+                            </div>`;
+                        }).join('');
+
+                        logsContainer.innerHTML = `<div style="background: var(--bg-2); padding: 1rem; border-radius: var(--radius-sm); max-height: 600px; overflow-y: auto; border: 1px solid var(--border)">${htmlLogs}</div>`;
                     } else {
                         logsContainer.innerHTML = '<div class="text-dim">No logs retrieved.</div>';
                     }
