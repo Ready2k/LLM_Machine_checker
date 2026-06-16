@@ -16,19 +16,43 @@ start() {
         fi
     fi
 
-    echo "Starting Gateway..."
+    # Enable HTTPS automatically if a cert pair is present (certs/server.{crt,key}).
+    SCHEME="http"
+    if [ -f "certs/server.crt" ] && [ -f "certs/server.key" ]; then
+        export GATEWAY_SSL_CERT="certs/server.crt"
+        export GATEWAY_SSL_KEY="certs/server.key"
+        SCHEME="https"
+    fi
+    PORT="${GATEWAY_PORT:-8080}"
+
+    echo "Starting Gateway (${SCHEME})..."
     # Ensure virtualenv is active or used
     if [ -d ".venv" ]; then
         .venv/bin/python -m gateway.server &
     else
         python3 -m gateway.server &
     fi
-    
+
     PID=$!
     echo $PID > "$PID_FILE"
+
+    # Best-effort LAN IP for convenience (macOS, then Linux/Pi)
+    LAN_IP=""
+    if command -v ipconfig >/dev/null 2>&1; then
+        LAN_IP="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true)"
+    fi
+    if [ -z "$LAN_IP" ] && command -v hostname >/dev/null 2>&1; then
+        LAN_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+    fi
+
     echo "Gateway started in background (PID: $PID)."
-    echo "Dashboard : http://0.0.0.0:8080"
-    echo "Chat UI   : http://0.0.0.0:8080/chat/"
+    echo "  Local : ${SCHEME}://127.0.0.1:${PORT}/chat/"
+    if [ -n "$LAN_IP" ]; then
+        echo "  LAN   : ${SCHEME}://${LAN_IP}:${PORT}/chat/   (use this on your phone)"
+    fi
+    if [ "$SCHEME" = "http" ]; then
+        echo "  (no TLS — run scripts/make_cert.sh then restart to enable HTTPS / phone voice)"
+    fi
 }
 
 stop() {

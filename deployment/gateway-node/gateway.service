@@ -1,0 +1,35 @@
+# systemd unit for the Local AI Fabric gateway (headless Raspberry Pi).
+#
+# Install:
+#   sudo cp deployment/gateway-node/gateway.service /etc/systemd/system/
+#   # edit User / WorkingDirectory / paths below to match your Pi
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now gateway
+#   systemctl status gateway          # check it's running
+#   journalctl -u gateway -f          # follow logs
+#
+# After editing this file later:  sudo systemctl daemon-reload && sudo systemctl restart gateway
+
+[Unit]
+Description=Local AI Fabric Gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/LocalLLM
+Environment=GATEWAY_HOST=0.0.0.0
+Environment=GATEWAY_PORT=8080
+
+# HTTPS (recommended — required for phone voice). Generate certs first with
+# scripts/make_cert.sh, then uncomment these two lines:
+# Environment=GATEWAY_SSL_CERT=/home/pi/LocalLLM/certs/server.crt
+# Environment=GATEWAY_SSL_KEY=/home/pi/LocalLLM/certs/server.key
+
+ExecStart=/home/pi/LocalLLM/.venv/bin/python -m gateway.server
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

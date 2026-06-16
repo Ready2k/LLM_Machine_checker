@@ -43,3 +43,9 @@ llm-bench-env/
 
 # Runtime files
 .gateway.pid
+
+# TLS certificates — never commit private keys
+certs/
+*.crt
+*.key
+*.pem

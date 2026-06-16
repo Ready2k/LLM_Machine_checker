@@ -70,10 +70,13 @@ inventory/
 
 ## Key Design Decisions
 
-- Gateway binds to `127.0.0.1:8080` only (never `0.0.0.0`) — intentional per security requirements.
+- Gateway binds to `0.0.0.0:8080` so it's reachable across the LAN (e.g. the `/chat/` UI from phones). Override with `GATEWAY_HOST` / `GATEWAY_PORT`. *(Historically localhost-only; opened up intentionally for the shared LAN chat terminal / Pi deployment.)*
+- **HTTPS:** set `GATEWAY_SSL_CERT` + `GATEWAY_SSL_KEY` to serve TLS (required for browser voice/mic — a secure-context feature). `scripts/make_cert.sh` generates a self-signed cert; `manage.sh` auto-enables HTTPS when `certs/server.{crt,key}` exist. Certs are gitignored.
+- **Chat UI** at `/chat/` is a self-contained ES-module app (`gateway/static/chat/`) with conversation history + long-term memory stored **client-side in IndexedDB** — the gateway stays stateless about users (no login on the shared LAN endpoint). Spec: `docs/CHAT_HISTORY_MEMORY_SPEC.md`.
 - `cloud-best` route is disabled by default (`status: not_configured`). Enabling it requires explicit config.
-- Telemetry logs routing metadata to JSONL but never logs prompt content.
+- Telemetry logs routing metadata to JSONL/SQLite but never logs prompt content.
 - `inference_enabled: false` on a backend prevents it from being selected even if `enabled: true` (used for the utility/admin node).
+- **Pi deployment:** `deployment/gateway-node/gateway.service` (systemd) runs it headless on boot; see `deployment/gateway-node/README.md`.
 
 ## Diagnostic Scripts
 

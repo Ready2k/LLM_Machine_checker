@@ -1024,9 +1024,15 @@ if __name__ == "__main__":
 
     _host = os.environ.get("GATEWAY_HOST", "0.0.0.0")
     _port = int(os.environ.get("GATEWAY_PORT", "8080"))
-    uvicorn.run(
-        "gateway.server:app",
-        host=_host,
-        port=_port,
-        reload=False,
-    )
+
+    # Optional TLS: set both GATEWAY_SSL_CERT and GATEWAY_SSL_KEY to serve HTTPS.
+    # HTTPS is required for browser voice/mic (secure context) on the LAN.
+    _ssl_cert = os.environ.get("GATEWAY_SSL_CERT") or None
+    _ssl_key = os.environ.get("GATEWAY_SSL_KEY") or None
+
+    _kwargs = {"host": _host, "port": _port, "reload": False}
+    if _ssl_cert and _ssl_key:
+        _kwargs["ssl_certfile"] = _ssl_cert
+        _kwargs["ssl_keyfile"] = _ssl_key
+
+    uvicorn.run("gateway.server:app", **_kwargs)
