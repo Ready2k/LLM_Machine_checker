@@ -6,7 +6,7 @@ import * as db from './db.js';
 import { uuid, SCHEMA_VERSION } from './db.js';
 import { initHistory, refreshSidebar, showUnavailable } from './history.js';
 import { initSettings } from './settings.js';
-import { initMemory, buildInjection } from './memory.js';
+import { initMemory, buildInjection, addSuggestions, refreshMemoryUI } from './memory.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 function esc(s) {
@@ -244,6 +244,7 @@ function persistDebounced() {
 }
 
 function newChat() {
+  maybeAutoExtract();   // best-effort on the conversation being left
   // Active conversation is already persisted incrementally; just reset.
   state.conv = null;
   state.messages = [];
@@ -251,6 +252,57 @@ function newChat() {
   showWelcome();
   refreshSidebar();
   $input.focus();
+}
+
+// ── Memory extraction (Phase 4) ───────────────────────────────────────────
+async function extractFrom(conversationId, messages) {
+  const payload = {
+    messages: messages
+      .filter(m => (m.role === 'user' || m.role === 'assistant') && m.content)
+      .map(m => ({ role: m.role, content: m.content })),
+  };
+  if (payload.messages.length < 2) return 0;
+  try {
+    const r = await fetch('/chat/memory/extract', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) return 0;
+    const { facts = [] } = await r.json();
+    if (!facts.length) return 0;
+    return await addSuggestions(facts, conversationId);
+  } catch {
+    return 0;
+  }
+}
+
+// Manual "Extract from current chat" (from the memory panel).
+async function extractCurrent() {
+  if (!state.conv || state.messages.filter(m => m.content).length < 2) {
+    toast('Have a short conversation first, then extract.');
+    return;
+  }
+  const added = await extractFrom(state.conv.id, state.messages);
+  toast(added ? `Found ${added} new suggestion${added === 1 ? '' : 's'}.` : 'No new suggestions found.');
+}
+
+// Best-effort auto-extraction on leaving a conversation. Snapshots state
+// synchronously so it's safe even though the caller resets state right after.
+function maybeAutoExtract() {
+  if (state.persistence !== 'indexeddb') return;
+  const conv = state.conv;
+  const messages = state.messages;
+  if (!conv) return;
+  const exchanges = messages.filter(m => m.role === 'assistant' && m.content).length;
+  if (exchanges < 2) return;
+  const convId = conv.id;
+  const snapshot = messages.slice();
+  (async () => {
+    if (!(await db.getSetting('autoExtract', true))) return;
+    const added = await extractFrom(convId, snapshot);
+    if (added) refreshMemoryUI();
+  })();
 }
 
 // Called after a bulk data change (import / clear). Refresh the sidebar and,
@@ -267,6 +319,7 @@ async function onDataChanged() {
 
 async function resume(id) {
   if (state.streaming) return;
+  if (state.conv?.id !== id) maybeAutoExtract();   // leaving the current chat
   const conv = await db.getConversation(id);
   if (!conv) { refreshSidebar(); return; }
   state.conv = {
@@ -593,7 +646,10 @@ async function init() {
     onDataChanged: onDataChanged,
   });
 
-  initMemory();
+  initMemory({
+    onExtractRequest: extractCurrent,
+    onJumpToConversation: resume,
+  });
 
   try {
     await db.openDB();

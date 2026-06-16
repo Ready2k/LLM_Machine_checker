@@ -110,6 +110,13 @@ html, body { height: 100%; background: var(--bg); color: var(--text);
 .mem-act:hover { color: var(--text); background: var(--border); }
 .mem-edit { width: 100%; background: var(--bg); border: 1px solid var(--accent); color: var(--text);
   font-size: 13px; padding: 5px 6px; border-radius: 4px; }
+#mem-suggested-list { display: flex; flex-direction: column; gap: 8px; }
+.mem-item.suggested { border-color: var(--accent-dk); background: #141c2b; }
+.mem-suggest-actions { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+.mem-suggest-actions .settings-btn { padding: 5px 10px; font-size: 12px; }
+.mem-source { background: none; border: none; color: var(--accent); cursor: pointer;
+  font-size: 11px; padding: 0; text-decoration: underline; }
+.mem-source:hover { color: var(--text); }
 
 /* Settings modal */
 #settings-modal { display: none; position: fixed; inset: 0; z-index: 300; }
@@ -418,7 +425,11 @@ footer { border-top: 1px solid var(--border); padding: 10px 16px 14px;
       <input type="checkbox" id="mem-enabled">
       <span>Use memory in chats</span>
     </label>
-    <p class="settings-hint">Enabled memories are added as background context to every chat. They never leave your local network and are stored only in this browser.</p>
+    <label class="mem-toggle">
+      <input type="checkbox" id="mem-autoextract">
+      <span>Auto-suggest memories from my chats</span>
+    </label>
+    <p class="settings-hint">Enabled memories are added as background context to every chat. They never leave your local network and are stored only in this browser. Auto-suggested memories are never used until you accept them.</p>
 
     <div class="settings-section">
       <h4>Add a memory</h4>
@@ -435,10 +446,19 @@ footer { border-top: 1px solid var(--border); padding: 10px 16px 14px;
       </div>
     </div>
 
+    <div class="settings-section" id="mem-suggested" style="display:none;">
+      <h4>Suggested from your chats</h4>
+      <p class="settings-hint">Review before use — these are model-generated and not active until accepted.</p>
+      <div id="mem-suggested-list"></div>
+    </div>
+
     <div class="settings-section">
       <div class="settings-row" style="justify-content: space-between;">
         <h4 style="margin:0;">Saved memories</h4>
-        <button id="mem-preview-btn" class="settings-btn">Preview injected context</button>
+        <div class="settings-row">
+          <button id="mem-extract-btn" class="settings-btn">Extract from current chat</button>
+          <button id="mem-preview-btn" class="settings-btn">Preview injected context</button>
+        </div>
       </div>
       <pre id="mem-preview" class="mem-preview"></pre>
       <div id="mem-list"></div>

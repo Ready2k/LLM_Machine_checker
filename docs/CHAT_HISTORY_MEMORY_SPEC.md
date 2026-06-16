@@ -356,3 +356,16 @@ IndexedDB can be unavailable (private browsing, locked-down or mobile browsers, 
 **Phase 3 — Memory viewer & manual memory.** Memory store, panel, manual add/edit/delete, enable/disable, injection, **preview injected memory**, clear memory (Change 4a–4c). Proves injection safely before any extraction.
 
 **Phase 4 — Memory extraction.** `/chat/memory/extract` (+ `/chat/title`), Suggested memories with Accept / Edit & accept / Dismiss, source links, tests for malformed model output (Change 4d, Change 7).
+
+---
+
+## Status
+
+All four phases are implemented, verified, and committed:
+
+- **Phase 1 — History core** — `129764e`
+- **Phase 2 — Backup & recovery** — `ed82f6f`
+- **Phase 3 — Manual memory + injection** — `8f92ebd`
+- **Phase 4 — Memory extraction** — stateless `/chat/memory/extract` + `/chat/title` (7 pytest cases), Suggested memories with Accept / Edit & accept / Dismiss (Dismiss = mark reviewed + disabled, so facts aren't re-suggested), substring dedupe, auto-extract toggle, source links.
+
+Known limitation (future work): dedupe is normalized exact + substring containment, so paraphrased facts can still be suggested. Semantic dedupe would need embeddings (the existing `/v1/embeddings` endpoint could power it).
