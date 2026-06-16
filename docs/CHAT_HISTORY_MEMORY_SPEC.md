@@ -338,6 +338,18 @@ IndexedDB can be unavailable (private browsing, locked-down or mobile browsers, 
 
 ---
 
+## Mobile & responsive UI
+
+The `/chat/` UI is used heavily from phones over the LAN, so it is built mobile-first. The patterns below are the load-bearing ones — change them with care.
+
+- **Viewport-tracking height.** The shell height is `height: var(--app-h, 100dvh)` with a `100vh` first declaration as the ultimate fallback. `app.js` `initViewport()` listens to `window.visualViewport` `resize`/`scroll` and sets `--app-h` to the *visual* viewport height. This is what keeps the input row above the on-screen keyboard and follows the collapsing mobile browser chrome — plain `100vh`/`100dvh` leaves the composer hidden behind the keyboard. `#app` uses `height: 100%` (of the shell) rather than its own `100vh`.
+- **Safe-area insets.** `<meta viewport ... viewport-fit=cover>` plus `env(safe-area-inset-*)` padding on the footer, header, and full-screen modals so content clears the notch / home indicator.
+- **No iOS focus-zoom.** All focusable form fields are `font-size: 16px` at `max-width: 600px`. Below 16px, iOS Safari zooms the page on focus. These overrides must be ID/class-specific because the base rules use IDs (higher specificity).
+- **Touch-friendly row actions.** Conversation pin/rename/delete buttons are `:hover`-revealed on desktop but always shown on touch — gated by both `@media (hover: none)` and the `max-width: 600px` block (belt-and-suspenders, since some emulators/devices don't report `hover: none`). Tap targets are enlarged there too.
+- **Enter behaviour is pointer-aware.** On desktop, Enter sends / Shift+Enter is a newline. On touch (`pointer: coarse`), Enter inserts a newline and the user sends with the button — otherwise the soft-keyboard Return key can never make a newline.
+- **Sidebar overlay + dismiss backdrop.** On mobile the sidebar is a fixed overlay toggled by `.sb-open` on `#shell`; `#sb-backdrop` dims the rest and dismisses on tap. **Gotcha:** the backdrop must live *inside* `#shell` because the rule that reveals it (`#shell.sb-open #sb-backdrop`) is a descendant selector. If it sits as a sibling before `#shell` it stays `display:none` forever — the sidebar then can't be dismissed by tapping off it. (This was a real bug; keep the element nested.)
+- **Full-screen modals on mobile.** The shared `.settings-card` (Settings + Memory) becomes a full-screen, scrollable sheet at `max-width: 600px` rather than a cramped floating card.
+
 ## Out of Scope / Future
 
 - Cross-device sync or server-side storage (requires identity/auth — deferred).

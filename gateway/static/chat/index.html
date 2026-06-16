@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Local AI Chat</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -26,12 +26,15 @@
 
 html, body { height: 100%; background: var(--bg); color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  font-size: 15px; line-height: 1.55; }
+  font-size: 15px; line-height: 1.55;
+  -webkit-tap-highlight-color: transparent; }
 
 /* ── Shell (sidebar + app) ── */
-#shell { display: flex; height: 100vh; overflow: hidden; }
+/* --app-h is set from visualViewport in JS so the layout tracks the soft
+   keyboard / browser chrome on mobile; falls back to dvh, then vh. */
+#shell { display: flex; height: 100vh; height: var(--app-h, 100dvh); overflow: hidden; }
 
-#app { flex: 1; min-width: 0; display: flex; flex-direction: column; height: 100vh; }
+#app { flex: 1; min-width: 0; display: flex; flex-direction: column; height: 100%; }
 
 /* ── Sidebar ── */
 #sidebar { width: var(--sidebar-w); flex-shrink: 0; background: var(--surface);
@@ -127,9 +130,9 @@ html, body { height: 100%; background: var(--bg); color: var(--text);
   border-radius: 12px; padding: 18px 20px 20px; max-height: 84vh; overflow-y: auto; }
 .settings-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
 .settings-head h3 { font-size: 16px; font-weight: 600; }
-#settings-close { background: none; border: none; color: var(--dim); font-size: 22px;
+#settings-close, #memory-close { background: none; border: none; color: var(--dim); font-size: 22px;
   cursor: pointer; line-height: 1; padding: 0 4px; }
-#settings-close:hover { color: var(--text); }
+#settings-close:hover, #memory-close:hover { color: var(--text); }
 .settings-status { font-size: 12px; color: var(--dim); margin-bottom: 14px; }
 .settings-section { border-top: 1px solid var(--border); padding-top: 14px; margin-top: 14px; }
 .settings-section h4 { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
@@ -232,6 +235,7 @@ header { display: flex; align-items: center; gap: 10px;
 
 /* ── Footer ── */
 footer { border-top: 1px solid var(--border); padding: 10px 16px 14px;
+  padding-bottom: max(14px, env(safe-area-inset-bottom));
   background: var(--surface); flex-shrink: 0; }
 .footer-inner { max-width: 860px; margin: 0 auto; }
 
@@ -292,21 +296,59 @@ footer { border-top: 1px solid var(--border); padding: 10px 16px 14px;
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
+/* Touch devices: row actions can't rely on :hover, so always show them. */
+@media (hover: none) {
+  .conv-actions { display: flex; }
+  .conv-act { padding: 8px 6px; font-size: 15px; }
+  .conv-main { padding: 9px 8px; }
+}
+
 @media (max-width: 600px) {
   #sidebar { position: fixed; top: 0; left: 0; z-index: 150;
-    margin-left: calc(-1 * var(--sidebar-w)); }
+    width: min(var(--sidebar-w), 84vw);
+    margin-left: calc(-1 * min(var(--sidebar-w), 84vw)); }
   #shell.sb-open #sidebar { margin-left: 0; }
   #shell.sb-open #sb-backdrop { display: block; position: fixed; inset: 0;
     background: rgba(0,0,0,.55); z-index: 140; }
-  .msg.user .bubble { max-width: 95%; }
+
+  /* Row actions are tap targets here (no hover on a narrow/touch screen). */
+  .conv-actions { display: flex; }
+  .conv-act { padding: 8px 6px; font-size: 15px; }
+  .conv-main { padding: 9px 8px; }
+
+  .msg.user .bubble { max-width: 92%; }
+  .welcome .hint { display: none; }    /* Enter=send is desktop-only */
   #new-chat-btn { display: none; }     /* use the sidebar's New chat on mobile */
+
+  /* Header: keep it from crowding; drop the subtitle, let the model picker grow. */
+  header { padding: 10px 12px;
+    padding-top: max(10px, env(safe-area-inset-top)); gap: 8px; }
+  .logo sub { display: none; }
+  .logo { font-size: 14px; }
+  #model-select { max-width: none; }
+  .sb-toggle { width: 38px; height: 38px; }
+
+  /* 16px on form fields prevents iOS Safari from zooming the page on focus. */
+  #msg-input, #model-select, #sb-search-input,
+  #mem-add-input, #mem-add-cat, #import-mode,
+  .mem-add-row input[type="text"], .conv-rename, .mem-edit { font-size: 16px; }
+
+  #messages { padding: 16px 12px; }
+  footer { padding: 8px 10px; padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+  .input-row { gap: 6px; }
+
+  /* Modals go full-screen so long content (memory list) is comfortable to scroll. */
+  .settings-card { width: 100%; max-width: none; margin: 0; border: none;
+    border-radius: 0; min-height: 100dvh; max-height: none;
+    padding: 16px 16px calc(20px + env(safe-area-inset-bottom));
+    padding-top: max(16px, env(safe-area-inset-top)); }
+  #settings-close, #memory-close { font-size: 30px; padding: 4px 10px; margin: -4px -6px; }
 }
 </style>
 </head>
 <body>
 
 <div id="drop-overlay">Drop file to attach</div>
-<div id="sb-backdrop"></div>
 
 <div id="shell">
   <aside id="sidebar">
@@ -373,6 +415,10 @@ footer { border-top: 1px solid var(--border); padding: 10px 16px 14px;
       </div>
     </footer>
   </div>
+
+  <!-- Sidebar dismiss overlay (mobile). Must live inside #shell so the
+       `#shell.sb-open #sb-backdrop` rule matches and it can catch taps. -->
+  <div id="sb-backdrop"></div>
 </div>
 
 <!-- Settings & backup modal -->

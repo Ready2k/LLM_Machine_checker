@@ -9,6 +9,7 @@ A lightweight, zero-dependency Python gateway and machine profiling system for h
 - **Privacy Enforcement**: Block sensitive code or private documents from ever reaching the cloud via configurable privacy tiers (`personal`, `work`, `confidential`, `public`).
 - **Telemetry & Monitoring**: Log metadata of all routing decisions to JSONL without logging sensitive prompts.
 - **Unified API**: Exposes an OpenAI-compatible `/v1/chat/completions` and `/v1/models` endpoint for drop-in integration with Open WebUI, Cursor, and VS Code.
+- **Web Chat UI**: A self-contained, mobile-friendly chat terminal at `/chat/` with conversation history and long-term memory stored client-side (IndexedDB) — no login, nothing user-specific stored on the gateway.
 
 ## Quick Start
 
@@ -36,6 +37,7 @@ A lightweight, zero-dependency Python gateway and machine profiling system for h
 ## Key Endpoints
 
 - `GET /` - Admin dashboard.
+- `GET /chat/` - Mobile-friendly web chat UI (history + memory stored client-side).
 - `GET /api/backends/health` - Live health check of all configured inference nodes.
 - `GET /v1/models` - Lists available abstract models (`local-fast`, `local-quality`, `cloud-best`).
 - `POST /v1/chat/completions` - OpenAI-compatible inference endpoint.
@@ -45,6 +47,7 @@ A lightweight, zero-dependency Python gateway and machine profiling system for h
 - [Open WebUI Setup Guide](docs/OPEN_WEBUI_SETUP.md)
 - [Gateway Specification](docs/LOCAL_AI_FABRIC_SPEC.md)
 - [Web Dashboard Implementation Plan](docs/WEB_DASHBOARD_IMPLEMENTATION_PLAN.md)
+- [Chat History & Memory Spec](docs/CHAT_HISTORY_MEMORY_SPEC.md)
 
 ## Diagnostics
 

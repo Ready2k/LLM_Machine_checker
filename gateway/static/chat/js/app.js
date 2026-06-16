@@ -605,6 +605,29 @@ function autoResize() {
   $input.style.height = Math.min($input.scrollHeight, 220) + 'px';
 }
 
+// ── Mobile viewport ─────────────────────────────────────────────────────────
+// Track the visual viewport so the chat height follows the soft keyboard and
+// the collapsing browser chrome. Without this, `100vh`/`100dvh` leaves the
+// input row hidden behind the on-screen keyboard on mobile. Falls back to the
+// CSS dvh/vh chain when visualViewport is unavailable.
+function initViewport() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const root = document.documentElement;
+  let raf = null;
+  const apply = () => {
+    raf = null;
+    root.style.setProperty('--app-h', vv.height + 'px');
+    if (state.streaming || $msgs.scrollHeight - $msgs.scrollTop - $msgs.clientHeight < 80) {
+      scrollDown();
+    }
+  };
+  const schedule = () => { if (raf == null) raf = requestAnimationFrame(apply); };
+  vv.addEventListener('resize', schedule);
+  vv.addEventListener('scroll', schedule);
+  apply();
+}
+
 // ── Drag-and-drop ───────────────────────────────────────────────────────────
 function initDragDrop() {
   let dragN = 0;
@@ -622,10 +645,14 @@ async function init() {
   loadModels();
   initVoice();
   initDragDrop();
+  initViewport();
 
+  // On touch devices the soft-keyboard Return key should insert a newline; users
+  // send with the button. On desktop, Enter sends (Shift+Enter = newline).
+  const enterSends = !window.matchMedia('(pointer: coarse)').matches;
   $input.addEventListener('input', autoResize);
   $input.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+    if (enterSends && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   });
   $send.addEventListener('click', send);
   $fInput.addEventListener('change', () => addFiles($fInput.files));
