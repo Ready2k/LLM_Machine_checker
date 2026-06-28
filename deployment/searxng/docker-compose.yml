@@ -1,0 +1,25 @@
+# SearXNG — self-hosted metasearch for the gateway's web-grounding feature.
+#
+# Keeps search QUERIES on the LAN: the gateway asks this node, which proxies to
+# upstream engines server-side. (Page fetches still leave the LAN — that's the
+# gateway, not SearXNG.) Run this on any always-on node (e.g. the Pi/hub).
+#
+#   docker compose up -d
+#
+# Then point the gateway at it via config/tools.yaml -> searxng_url, or the
+# SEARXNG_URL env var, e.g.  SEARXNG_URL=http://<this-host>:8080
+#
+# IMPORTANT: JSON output must be enabled (see settings.yml below) or the gateway
+# gets HTTP 403 on ?format=json.
+services:
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng
+    ports:
+      - "8080:8080"          # change the host port if 8080 is taken on this node
+    volumes:
+      - ./settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      # Public base URL of this instance (used in generated links).
+      - SEARXNG_BASE_URL=http://localhost:8080/
+    restart: unless-stopped

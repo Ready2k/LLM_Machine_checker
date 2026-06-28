@@ -25,6 +25,16 @@ def is_privacy_allowed(requested_privacy: str, route_config: dict) -> bool:
         
     return requested_privacy in allowed
 
+def is_web_search_allowed(requested_privacy: str, security_config: dict) -> bool:
+    """
+    Web grounding fetches pages from the open web, so it leaks beyond the LAN.
+    Gate it by privacy tier (security.yaml -> web_search.allowed_privacy).
+    Defaults to public/personal only if unconfigured.
+    """
+    ws = (security_config or {}).get("web_search", {})
+    allowed = ws.get("allowed_privacy", ["public", "personal"])
+    return requested_privacy in allowed
+
 def can_fallback_to_cloud(requested_privacy: str, route_config: dict, security_config: dict) -> bool:
     """
     Checks if cloud fallback is allowed for this privacy level and route.

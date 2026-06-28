@@ -5,6 +5,12 @@ models:
     provider: auto
     purpose: intelligent auto-routing — gateway selects route based on prompt analysis
 
+  web:
+    route: local-quality
+    model: auto
+    provider: auto
+    purpose: web-grounded answers — searches the LAN SearXNG, fetches pages, and cites real sources (auto-routes the synthesis)
+
   local-fast:
     route: local-fast
     model: qwen2.5-coder:7b

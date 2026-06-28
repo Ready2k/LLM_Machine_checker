@@ -1,0 +1,16 @@
+# Minimal SearXNG settings for gateway web-grounding.
+# The key line is `formats: [html, json]` — without `json`, the gateway's
+# ?format=json requests are rejected with HTTP 403.
+use_default_settings: true
+
+server:
+  # Replace with a long random string: `openssl rand -hex 32`
+  secret_key: "CHANGE_ME_openssl_rand_hex_32"
+  limiter: false            # this is a private LAN instance, not public
+  image_proxy: false
+
+search:
+  formats:
+    - html
+    - json                  # <-- REQUIRED for the gateway
+  safe_search: 0

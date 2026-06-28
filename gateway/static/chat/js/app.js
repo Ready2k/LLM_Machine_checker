@@ -53,6 +53,7 @@ const state = {
   persistence: 'memory-only',
   historyAvailable: false,
   historyError: null,
+  webSearch: false,        // 🌐 web grounding toggle (restored from localStorage)
 };
 
 // ── DOM ───────────────────────────────────────────────────────────────────
@@ -63,6 +64,7 @@ const $mic    = document.getElementById('mic-btn');
 const $fInput = document.getElementById('file-input');
 const $chips  = document.getElementById('file-chips');
 const $model  = document.getElementById('model-select');
+const $web    = document.getElementById('web-toggle');
 const $dropOvl = document.getElementById('drop-overlay');
 
 const WELCOME_HTML = `
@@ -89,9 +91,11 @@ async function loadModels() {
     const r = await fetch('/v1/models');
     if (!r.ok) return;
     const { data = [] } = await r.json();
+    // 'web' is driven by the 🌐 toggle (a header), not a routing model, so it's
+    // hidden from the picker — the toggle composes with whatever model is chosen.
     const sorted = [
       ...data.filter(m => m.id === 'auto'),
-      ...data.filter(m => m.id !== 'auto').sort((a, b) => a.id.localeCompare(b.id)),
+      ...data.filter(m => m.id !== 'auto' && m.id !== 'web').sort((a, b) => a.id.localeCompare(b.id)),
     ];
     $model.innerHTML = sorted.map(m =>
       `<option value="${esc(m.id)}">${esc(LABELS[m.id] || m.id)}</option>`
@@ -130,6 +134,34 @@ function makeBadge({ route, backend, model, reason }) {
   return el;
 }
 
+// Decode the base64(JSON) x-ai-sources header (UTF-8 safe).
+function decodeSources(b64) {
+  if (!b64) return [];
+  try {
+    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    const arr = JSON.parse(new TextDecoder().decode(bytes));
+    return Array.isArray(arr) ? arr : [];
+  } catch { return []; }
+}
+
+// Append a clickable "Sources" list (web grounding) under an assistant message.
+function renderSources(wrap, sources) {
+  if (!sources || !sources.length) return;
+  const box = document.createElement('div');
+  box.className = 'sources';
+  box.innerHTML = '<div class="sources-head">Sources</div>' + sources.map(s =>
+    `<a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">` +
+    `<span class="snum">[${esc(String(s.n))}]</span>` +
+    `<span class="stitle">${esc(s.title || s.url)}</span></a>`
+  ).join('');
+  wrap.appendChild(box);
+}
+
+function syncWebToggle() {
+  $web.classList.toggle('on', !!state.webSearch);
+  $web.setAttribute('aria-pressed', state.webSearch ? 'true' : 'false');
+}
+
 const INTERRUPTED_HTML = ' <span style="color:var(--err)">[stream interrupted]</span>';
 
 // Re-render a stored conversation from state.messages.
@@ -157,11 +189,12 @@ function renderStored(m) {
     if (m.route || m.backend || m.model) {
       wrap.appendChild(makeBadge({ route: m.route, backend: m.backend, model: m.model }));
     }
+    renderSources(wrap, m.sources);
     $msgs.appendChild(wrap);
   }
 }
 
-function addTypingDots() {
+function addTypingDots(initialLabel) {
   clearWelcome();
   const wrap = document.createElement('div');
   wrap.className = 'msg assistant';
@@ -179,7 +212,7 @@ function addTypingDots() {
   $msgs.appendChild(wrap);
   scrollDown();
 
-  let base = 'Connecting';
+  let base = initialLabel || 'Connecting';
   const $lbl = wrap.querySelector('.think-label');
   const $note = wrap.querySelector('.think-note');
   const t0 = Date.now();
@@ -387,7 +420,7 @@ async function send() {
     ? [{ role: 'system', content: memBlock }, ...convMessages]
     : convMessages;
 
-  const thinking = addTypingDots();
+  const thinking = addTypingDots(state.webSearch ? 'Searching the web' : undefined);
   state.streaming = true;
   $send.disabled = true;
 
@@ -395,9 +428,11 @@ async function send() {
   let aMsgAdded = false;
 
   try {
+    const reqHeaders = { 'Content-Type': 'application/json' };
+    if (state.webSearch) reqHeaders['x-ai-web-search'] = 'true';
     const resp = await fetch('/v1/chat/completions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: reqHeaders,
       body: JSON.stringify({ model: $model.value, messages: reqMessages, stream: true }),
     });
 
@@ -413,6 +448,8 @@ async function send() {
       model:   resp.headers.get('x-ai-model'),
       reason:  resp.headers.get('x-ai-auto-reason'),
     };
+    // Web grounding result (sources ride a response header so streaming is unaffected).
+    aMsg.sources = decodeSources(resp.headers.get('x-ai-sources'));
 
     thinking.setGenerating(routeInfo.model || routeInfo.route);
     thinking.stop();
@@ -470,6 +507,7 @@ async function send() {
     aMsg.backend = routeInfo.backend;
     aMsg.model = routeInfo.model;
     if (routeInfo.route || routeInfo.backend) wrap.appendChild(makeBadge(routeInfo));
+    renderSources(wrap, aMsg.sources);
     if (routeInfo.route) state.conv.lastRoute = routeInfo.route;
 
     await persist();
@@ -655,6 +693,16 @@ async function init() {
     if (enterSends && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   });
   $send.addEventListener('click', send);
+
+  // Web grounding toggle — preference persists in this browser.
+  state.webSearch = localStorage.getItem('lai_web_search') === '1';
+  syncWebToggle();
+  $web.addEventListener('click', () => {
+    state.webSearch = !state.webSearch;
+    localStorage.setItem('lai_web_search', state.webSearch ? '1' : '0');
+    syncWebToggle();
+  });
+
   $fInput.addEventListener('change', () => addFiles($fInput.files));
   $chips.addEventListener('click', e => {
     const btn = e.target.closest('button[data-idx]');

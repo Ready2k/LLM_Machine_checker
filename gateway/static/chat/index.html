@@ -167,6 +167,14 @@ header { display: flex; align-items: center; gap: 10px;
   cursor: pointer; flex: 1; max-width: 210px; }
 #model-select:focus { outline: 1px solid var(--accent); }
 
+/* Web grounding toggle */
+#web-toggle { background: var(--surface2); border: 1px solid var(--border);
+  color: var(--dim); height: 30px; padding: 0 10px; border-radius: 6px;
+  cursor: pointer; font-size: 13px; white-space: nowrap; flex-shrink: 0;
+  display: inline-flex; align-items: center; gap: 5px; transition: all .15s; }
+#web-toggle:hover { border-color: var(--accent); color: var(--text); }
+#web-toggle.on { background: var(--user-bg); border-color: var(--accent); color: var(--accent); }
+
 .hdr-gap { flex: 1; }
 
 #new-chat-btn { background: transparent; border: 1px solid var(--border);
@@ -211,6 +219,17 @@ header { display: flex; align-items: center; gap: 10px;
 .bubble ul, .bubble ol { padding-left: 20px; margin: 6px 0; }
 .bubble strong { font-weight: 600; }
 .bubble em { font-style: italic; }
+
+/* Sources (web grounding) */
+.sources { max-width: 860px; width: 100%; margin: 2px auto 0;
+  display: flex; flex-direction: column; gap: 3px; }
+.sources-head { color: var(--dim); font-size: 10px; text-transform: uppercase;
+  letter-spacing: .04em; margin-bottom: 1px; }
+.sources a { color: var(--accent); text-decoration: none; font-size: 12px;
+  display: flex; gap: 6px; align-items: baseline; max-width: 100%; }
+.sources a:hover { text-decoration: underline; }
+.sources .snum { color: var(--dim); flex-shrink: 0; }
+.sources .stitle { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* Route badge */
 .badge { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
@@ -327,6 +346,7 @@ footer { border-top: 1px solid var(--border); padding: 10px 16px 14px;
   .logo sub { display: none; }
   .logo { font-size: 14px; }
   #model-select { max-width: none; }
+  #web-toggle .lbl { display: none; }   /* globe only on mobile to save space */
   .sb-toggle { width: 38px; height: 38px; }
 
   /* 16px on form fields prevents iOS Safari from zooming the page on focus. */
@@ -373,6 +393,7 @@ footer { border-top: 1px solid var(--border); padding: 10px 16px 14px;
       <select id="model-select" title="Routing model">
         <option value="auto">Auto (smart routing)</option>
       </select>
+      <button id="web-toggle" type="button" title="Search the web and cite real sources for this answer" aria-pressed="false">🌐 <span class="lbl">Web</span></button>
       <div class="hdr-gap"></div>
       <button id="new-chat-btn" data-action="new-chat">+ New chat</button>
     </header>

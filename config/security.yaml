@@ -7,6 +7,14 @@ security:
   allowed_bind_hosts:
     - 127.0.0.1
 
+  # Web grounding gate. SearXNG keeps the query on the LAN, but page fetches
+  # leave the network — so only allow it for lower-sensitivity tiers. Requests
+  # at a disallowed tier still answer, just without web grounding.
+  web_search:
+    allowed_privacy:
+      - public
+      - personal
+
 telemetry:
   enabled: true
   log_prompts: false

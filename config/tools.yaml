@@ -1,0 +1,13 @@
+# Gateway tools config. See tools.example.yaml for the full annotated version.
+# tools.local.yaml (gitignored) overrides this; SEARXNG_URL env overrides searxng_url.
+tools:
+  web_search:
+    enabled: true
+    # Point this at your LAN SearXNG node (JSON output must be enabled). Override
+    # with the SEARXNG_URL env var. Until reachable, "web" requests degrade
+    # gracefully to an ungrounded answer (response header x-ai-grounding flags it).
+    searxng_url: "http://searxng.lan:8080"
+    n_results: 3
+    max_chars_per_source: 6000
+    search_timeout_s: 6
+    fetch_timeout_s: 6

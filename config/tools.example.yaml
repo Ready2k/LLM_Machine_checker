@@ -1,0 +1,24 @@
+# Gateway tools config.
+#
+# Copy to tools.yaml (or tools.local.yaml) and adjust. The loader prefers
+# .local.yaml > .yaml > .example.yaml, and SEARXNG_URL env overrides searxng_url.
+tools:
+  # Web grounding: search the web via a self-hosted SearXNG instance and inject
+  # the fetched page text as context so models cite real sources.
+  #
+  # Triggered per request by model alias "web" / "auto-web", header
+  # x-ai-web-search: true, or metadata.web_search: true.
+  #
+  # Privacy: search queries stay on the LAN (SearXNG proxies to engines), but
+  # page fetches leave the LAN. Gated by security.yaml -> web_search.allowed_privacy.
+  web_search:
+    enabled: true
+    # Your LAN SearXNG node. MUST have JSON output enabled in its settings.yml:
+    #   search: { formats: [html, json] }
+    # Override at runtime with the SEARXNG_URL env var.
+    searxng_url: "http://searxng.lan:8080"
+    n_results: 3                 # how many sources to fetch + cite
+    max_chars_per_source: 6000   # truncate each page (small local context windows!)
+    search_timeout_s: 6
+    fetch_timeout_s: 6
+    # engines: "google,duckduckgo,bing"   # optional; omit for SearXNG defaults

@@ -8,6 +8,7 @@ Bind address: GATEWAY_HOST env var (default 0.0.0.0 — all interfaces).
 Port:         GATEWAY_PORT env var (default 8080).
 """
 
+import base64
 import io
 import json
 import os
@@ -29,9 +30,10 @@ from gateway.providers.base import BackendHealth, ModelInfo, ChatCompletionReque
 from gateway.providers.ollama import OllamaProvider
 from gateway.providers.lmstudio import LMStudioProvider
 from gateway.providers.openai_compatible import OpenAICompatibleProvider
-from gateway.policy.privacy import extract_privacy_level, is_privacy_allowed, can_fallback_to_cloud
+from gateway.policy.privacy import extract_privacy_level, is_privacy_allowed, can_fallback_to_cloud, is_web_search_allowed
 from gateway.policy.routing import resolve_model_to_route, select_backend
 from gateway.policy.autoroute import select_auto_route
+from gateway.tools.websearch import WebSearchClient, build_grounding_block
 from gateway.telemetry.events import log_routing_decision, log_llm_event, _load_telemetry_config
 from gateway.telemetry.database import init_db, close_db
 from gateway.api_observability import router as observability_router
@@ -252,6 +254,9 @@ def load_security_config() -> dict:
 def load_backends_config() -> dict:
     return _load_yaml_or_json("backends", {"backends": {}})
 
+def load_tools_config() -> dict:
+    return _load_yaml_or_json("tools", {"tools": {}})
+
 def get_provider(backend_id: str, backends_config: dict) -> Optional[Provider]:
     b_config = backends_config.get("backends", {}).get(backend_id)
     if not b_config:
@@ -457,6 +462,63 @@ async def _run_utility_completion(messages: list[dict], max_tokens: int, route_a
     if response.choices:
         return response.choices[0].get("message", {}).get("content", "") or ""
     return ""
+
+
+WEB_MODEL_ALIASES = {"web", "auto-web", "web-search"}
+
+
+def _last_user_text(messages: list[dict]) -> str:
+    """The latest user turn as plain text — used as the web-search query.
+    Handles both string content and OpenAI structured content parts."""
+    for m in reversed(messages):
+        if m.get("role") != "user":
+            continue
+        content = m.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return " ".join(
+                p.get("text", "")
+                for p in content
+                if isinstance(p, dict) and p.get("type") == "text"
+            )
+    return ""
+
+
+async def _apply_web_grounding(request: ChatCompletionRequest, privacy_level: str,
+                               security_config: dict, correlation_id: str):
+    """Search the web for the latest user turn and prepend a grounding system
+    message instructing the model to answer only from real, fetched sources.
+
+    Never raises — on any problem it returns the request unchanged plus a status
+    string explaining why grounding didn't apply, so the request still completes
+    (just ungrounded). Returns (request, sources_meta, status)."""
+    if not is_web_search_allowed(privacy_level, security_config):
+        return request, [], "blocked_by_privacy"
+
+    client = WebSearchClient(load_tools_config().get("tools", {}).get("web_search", {}))
+    if not client.available:
+        return request, [], "unavailable"
+
+    query = _last_user_text(request.messages).strip()
+    if not query:
+        return request, [], "no_query"
+
+    try:
+        sources = await client.gather(query)
+    except Exception as e:
+        log_llm_event(correlation_id, "web.search.error", str(e)[:200])
+        return request, [], "error"
+
+    if not sources:
+        return request, [], "no_results"
+
+    grounded = request.model_copy(update={
+        "messages": [{"role": "system", "content": build_grounding_block(sources)}, *request.messages]
+    })
+    log_llm_event(correlation_id, "web.search", f"grounded with {len(sources)} sources",
+                  {"sources": len(sources)})
+    return grounded, [s.to_meta() for s in sources], "grounded"
 
 
 @app.post("/chat/memory/extract")
@@ -843,7 +905,8 @@ async def embeddings(request: Request):
 
 
 @app.post("/v1/chat/completions")
-async def chat_completions(request: ChatCompletionRequest, x_ai_privacy: Optional[str] = Header(None)):
+async def chat_completions(request: ChatCompletionRequest, x_ai_privacy: Optional[str] = Header(None),
+                           x_ai_web_search: Optional[str] = Header(None)):
     correlation_id = str(uuid.uuid4())
     if not request.metadata:
         request.metadata = {}
@@ -860,11 +923,32 @@ async def chat_completions(request: ChatCompletionRequest, x_ai_privacy: Optiona
     # 1. Privacy
     privacy_level = extract_privacy_level(request.metadata, x_ai_privacy, security_config.get("default_privacy", "personal"))
 
+    # 1b. Web grounding requested? Via model alias, header, or metadata. The
+    #     alias is rewritten to "auto" so route selection runs on the clean
+    #     prompt; the actual search/inject happens after auto-routing below.
+    web_requested = (
+        request.model in WEB_MODEL_ALIASES
+        or str(x_ai_web_search or "").lower() in ("1", "true", "yes", "on")
+        or bool(request.metadata.get("web_search"))
+    )
+    if request.model in WEB_MODEL_ALIASES:
+        request = request.model_copy(update={"model": "auto"})
+
     # 2. Auto-routing: inspect prompt and pick best route automatically
     auto_reason = None
     if request.model == "auto":
         auto_route, auto_reason = select_auto_route(request.messages, privacy_level)
         request = request.model_copy(update={"model": auto_route})
+
+    # 2b. Web grounding: search + fetch, then prepend a grounding system message.
+    #     Done after route selection so the injected sources don't skew the
+    #     prompt classifier. Degrades gracefully (status header) on any failure.
+    grounding_sources: list[dict] = []
+    grounding_status: Optional[str] = None
+    if web_requested:
+        request, grounding_sources, grounding_status = await _apply_web_grounding(
+            request, privacy_level, security_config, correlation_id
+        )
 
     # 3. Resolve Model -> Route
     route_name, route_config = resolve_model_to_route(request.model, models_config, routes_config)
@@ -906,6 +990,16 @@ async def chat_completions(request: ChatCompletionRequest, x_ai_privacy: Optiona
 
     if auto_reason:
         headers["x-ai-auto-reason"] = auto_reason
+
+    # Web grounding result for the client (sources ride a header so streaming is
+    # unaffected; the value is base64(JSON) to stay ASCII-safe for any title/URL).
+    if web_requested:
+        headers["x-ai-grounding"] = grounding_status or "unknown"
+        if grounding_sources:
+            headers["x-ai-grounded"] = "true"
+            headers["x-ai-sources"] = base64.b64encode(
+                json.dumps(grounding_sources).encode("utf-8")
+            ).decode("ascii")
 
     if request.stream:
         async def stream_wrapper(gen):
