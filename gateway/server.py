@@ -14,21 +14,20 @@ import copy
 import json
 import os
 from contextlib import asynccontextmanager
-import subprocess
-import sys
+import subprocess  # noqa: F401  (tests patch gateway.server.subprocess.run)
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException, Header, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 import uuid
 import time
 import httpx
 
-from gateway.providers.base import BackendHealth, ModelInfo, ChatCompletionRequest, ChatCompletionResponse, Provider
+from gateway.providers.base import ChatCompletionRequest, Provider
 from gateway.providers.ollama import OllamaProvider
 from gateway.providers.lmstudio import LMStudioProvider
 from gateway.providers.openai_compatible import OpenAICompatibleProvider, close_client
@@ -40,12 +39,26 @@ from gateway.policy.auth import api_key_middleware, auth_status
 from gateway.policy.limits import limits_middleware, limits_config, clamp_max_tokens
 from gateway.tools.websearch import WebSearchClient, inject_grounding
 from gateway.telemetry.events import log_routing_decision, log_llm_event
-from gateway.telemetry.database import init_db, close_db, get_db
+from gateway.telemetry.database import init_db, close_db, get_db  # noqa: F401  (get_db is patched on this module by tests and read via api_dashboard)
 from gateway.api_observability import router as observability_router
-from gateway.chat_helpers import (
-    router as chat_helpers_router,
-    ChatMessagesRequest, _format_transcript, _parse_facts, _run_utility_completion,
+from gateway.api_dashboard import (  # noqa: F401  (re-exported: tests and other modules import these from gateway.server)
+    router as dashboard_router,
+    HealthResponse,
+    MachineRouting,
+    RuntimeValidation,
+    Machine,
+    InventorySummary,
+    InventoryResponse,
+    RouteConfig,
+    RoutesResponse,
+    ProfileRunResponse,
+    ProfileCurrentResponse,
+    ErrorResponse,
+    load_inventory,
+    derive_routes_from_inventory,
+    _request_row_to_event,
 )
+from gateway.chat_helpers import router as chat_helpers_router
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -63,149 +76,9 @@ CONFIG_DIR = PROJECT_ROOT / "config"
 # ---------------------------------------------------------------------------
 
 
-class HealthResponse(BaseModel):
-    status: str = "ok"
-    service: str = "local-ai-fabric-dashboard"
-    version: str = "0.1.0"
-
-
-class MachineRouting(BaseModel):
-    enabled: bool = False
-    preferred_routes: list[str] = Field(default_factory=list)
-    fallback_routes: list[str] = Field(default_factory=list)
-
-
-class RuntimeValidation(BaseModel):
-    torch_version: Optional[str] = None
-    cuda_available: Optional[bool] = None
-    cuda_device: Optional[str] = None
-
-
-class Machine(BaseModel):
-    id: str
-    hostname: str
-    os: str
-    arch: str = "unknown"
-    cpu: str = "Unknown"
-    ram_gb: Optional[float] = None
-    gpu_name: Optional[str] = None
-    vram_gb: Optional[float] = None
-    compatible: bool = False
-    recommended_role: str = "utility_node"
-    recommended_model: str = ""
-    measured_tokens_per_second: Optional[float] = None
-    risk: str = "none"
-    routing: MachineRouting = Field(default_factory=MachineRouting)
-    runtime_validation: Optional[RuntimeValidation] = None
-    notes: list[str] = Field(default_factory=list)
-
-
-class InventorySummary(BaseModel):
-    recommended_architecture: str = ""
-    primary_quality_node: str = ""
-    primary_fast_node: str = ""
-    utility_node: str = ""
-    cloud_policy: str = ""
-
-
-class InventoryResponse(BaseModel):
-    updated_at: str = ""
-    summary: InventorySummary = Field(default_factory=InventorySummary)
-    machines: list[Machine] = Field(default_factory=list)
-
-
-class RouteConfig(BaseModel):
-    primary: Optional[str] = None
-    fallback: Optional[str] = None
-    cloud_fallback: bool = False
-
-
-class RoutesResponse(BaseModel):
-    routes: dict[str, RouteConfig] = Field(default_factory=dict)
-    source: str = "derived"
-
-
-class ProfileRunResponse(BaseModel):
-    status: str
-    profile: Optional[dict[str, Any]] = None
-    error: Optional[str] = None
-    stderr: Optional[str] = None
-
-
-class ProfileCurrentResponse(BaseModel):
-    status: str
-    profile: Optional[dict[str, Any]] = None
-
-
-class ErrorResponse(BaseModel):
-    detail: str
-
-
 # ---------------------------------------------------------------------------
 # Inventory loader
 # ---------------------------------------------------------------------------
-
-
-def load_inventory() -> dict:
-    """Load machine inventory from JSON file.
-
-    Returns the parsed inventory dict or raises HTTPException if unavailable.
-    """
-    if not INVENTORY_PATH.exists():
-        try:
-            display_path = str(INVENTORY_PATH.relative_to(PROJECT_ROOT))
-        except ValueError:
-            display_path = str(INVENTORY_PATH)
-        raise HTTPException(
-            status_code=503,
-            detail=f"Inventory file not found: {display_path}",
-        )
-
-    try:
-        data = json.loads(INVENTORY_PATH.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Failed to read inventory: {exc}",
-        )
-
-    return data
-
-
-def derive_routes_from_inventory(machines: list[dict]) -> dict:
-    """Build route configuration from machine inventory data.
-
-    When no config/routes.yaml or config/routes.json exists, derive
-    sensible routes from the machine roles and routing preferences.
-    """
-    routes: dict[str, dict] = {
-        "local-fast": {"primary": None, "fallback": None, "cloud_fallback": False},
-        "local-quality": {"primary": None, "fallback": None, "cloud_fallback": False},
-        "private-docs": {"primary": None, "fallback": None, "cloud_fallback": False},
-        "cloud-best": {"primary": None, "fallback": None, "cloud_fallback": True, "enabled": False, "status": "not_configured"},
-    }
-
-    for machine in machines:
-        mid = machine.get("id", "")
-        role = machine.get("recommended_role", "")
-        routing = machine.get("routing", {})
-        enabled = routing.get("enabled", False)
-
-        if not enabled:
-            continue
-
-        preferred = routing.get("preferred_routes", [])
-        fallback = routing.get("fallback_routes", [])
-
-        for route_name in preferred:
-            if route_name in routes and routes[route_name]["primary"] is None:
-                routes[route_name]["primary"] = mid
-
-        for route_name in fallback:
-            if route_name in routes and routes[route_name]["fallback"] is None:
-                routes[route_name]["fallback"] = mid
-
-    return routes
 
 
 _CONFIG_CACHE: dict = {}  # path -> ((mtime_ns, size), parsed)
@@ -335,6 +208,7 @@ app = FastAPI(
 
 app.include_router(observability_router)
 app.include_router(chat_helpers_router)
+app.include_router(dashboard_router)
 app.middleware("http")(limits_middleware)
 app.middleware("http")(api_key_middleware)  # added last = outermost: runs first
 
@@ -427,214 +301,6 @@ async def _apply_web_grounding(request: ChatCompletionRequest, privacy_level: st
     log_llm_event(correlation_id, "web.search", f"grounded with {len(sources)} sources",
                   {"sources": len(sources)})
     return grounded, [s.to_meta() for s in sources], "grounded"
-
-
-@app.get("/api/health", response_model=HealthResponse)
-async def health():
-    """Health check endpoint."""
-    return HealthResponse()
-
-
-@app.get("/api/machines", response_model=InventoryResponse)
-async def get_machines():
-    """Return the full machine inventory."""
-    data = load_inventory()
-    return InventoryResponse(**data)
-
-
-@app.get("/api/machines/{machine_id}", response_model=Machine)
-async def get_machine(machine_id: str):
-    """Return a single machine by ID."""
-    data = load_inventory()
-    machines = data.get("machines", [])
-
-    for machine in machines:
-        if machine.get("id") == machine_id:
-            return Machine(**machine)
-
-    raise HTTPException(status_code=404, detail=f"Machine not found: {machine_id}")
-
-
-@app.get("/api/config/routes", response_model=RoutesResponse)
-async def get_routes():
-    """Return routing configuration.
-
-    Reads from config/routes.yaml or config/routes.json if available.
-    Otherwise derives routes from the machine inventory.
-    """
-    data = load_routes_config()
-    return RoutesResponse(**data)
-
-
-@app.get("/api/profile/current", response_model=ProfileCurrentResponse)
-async def get_current_profile():
-    """Return the cached profile for the current host, if available."""
-    global _cached_profile
-
-    if _cached_profile is not None:
-        return ProfileCurrentResponse(status="available", profile=_cached_profile)
-
-    return ProfileCurrentResponse(status="unavailable", profile=None)
-
-
-@app.post("/api/profile/run", response_model=ProfileRunResponse)
-async def run_profile():
-    """Run the profiler on the current host.
-
-    Executes profile_machine.py with --json flag using safe subprocess
-    invocation. Does NOT overwrite inventory/machines.json.
-
-    This is an admin action — in production, protect with auth.
-    """
-    if not PROFILER_PATH.exists():
-        try:
-            display_path = str(PROFILER_PATH.relative_to(PROJECT_ROOT))
-        except ValueError:
-            display_path = str(PROFILER_PATH)
-        raise HTTPException(
-            status_code=503,
-            detail=f"Profiler script not found: {display_path}",
-        )
-
-    try:
-        result = subprocess.run(
-            [sys.executable, str(PROFILER_PATH), "--json"],
-            cwd=str(PROJECT_ROOT),
-            capture_output=True,
-            text=True,
-            timeout=120,
-            check=False,
-        )
-    except subprocess.TimeoutExpired:
-        return ProfileRunResponse(
-            status="error",
-            error="Profiler timed out after 120 seconds",
-        )
-    except OSError as exc:
-        return ProfileRunResponse(
-            status="error",
-            error=f"Failed to execute profiler: {exc}",
-        )
-
-    if result.returncode != 0:
-        return ProfileRunResponse(
-            status="error",
-            error=f"Profiler exited with code {result.returncode}",
-            stderr=result.stderr[:2000] if result.stderr else None,
-        )
-
-    # Parse JSON output
-    try:
-        profile_data = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        return ProfileRunResponse(
-            status="error",
-            error=f"Failed to parse profiler JSON output: {exc}",
-            stderr=result.stdout[:2000],
-        )
-
-    # Cache the result for GET /api/profile/current
-    global _cached_profile
-    _cached_profile = profile_data
-
-    return ProfileRunResponse(status="ok", profile=profile_data)
-
-
-def _request_row_to_event(row) -> dict:
-    """llm_requests row -> the event shape /api/events has always returned."""
-    (ts, route, backend, model, privacy, status, ttft, dur, fb, err, stream, tin, tout) = row
-    return {
-        "timestamp": ts, "event_type": "chat_completion", "route": route, "backend": backend,
-        "model": model, "privacy": privacy, "ttft_ms": ttft, "latency_ms": dur,
-        "fallback_used": bool(fb), "status": status, "error_code": err,
-        "stream": bool(stream), "tokens_in": tin, "tokens_out": tout,
-    }
-
-
-@app.get("/api/events")
-async def get_events(limit: int = 100, status: str = "all"):
-    """Latest routing events (newest first) from the SQLite telemetry store."""
-    limit = min(max(1, limit), 500)
-    db = await get_db()
-    if not db:
-        return {"events": [], "total_on_disk": 0, "returned": 0}
-
-    async with db.execute("SELECT COUNT(*) FROM llm_requests") as cur:
-        total = (await cur.fetchone())[0]
-    where, params = ("", ())
-    if status != "all":
-        where, params = ("WHERE status = ?", (status,))
-    async with db.execute(
-        "SELECT timestamp_start, route, backend, model, privacy, status, time_to_first_token_ms, "
-        "duration_ms, fallback_used, error_code, is_stream, tokens_in, tokens_out "
-        f"FROM llm_requests {where} ORDER BY timestamp_start DESC LIMIT ?",
-        (*params, limit),
-    ) as cur:
-        events = [_request_row_to_event(r) for r in await cur.fetchall()]
-
-    return {"events": events, "total_on_disk": total, "returned": len(events)}
-
-
-@app.get("/api/stats")
-async def get_stats():
-    """Aggregate routing statistics from the SQLite telemetry store."""
-    stats = {
-        "total_requests": 0,
-        "success_rate_pct": 0.0,
-        "error_count": 0,
-        "fallback_count": 0,
-        "fallback_rate_pct": 0.0,
-        "requests_by_route": {},
-        "requests_by_backend": {},
-        "avg_latency_ms_by_backend": {},
-        "p95_latency_ms_by_backend": {},
-        "privacy_breakdown": {},
-        "stream_count": 0,
-        "period_start": None,
-        "period_end": None,
-    }
-    db = await get_db()
-    if not db:
-        return stats
-
-    async with db.execute(
-        "SELECT COUNT(*), SUM(status = 'success'), SUM(COALESCE(fallback_used, 0)), "
-        "SUM(COALESCE(is_stream, 0)), MIN(timestamp_start), MAX(timestamp_start) FROM llm_requests"
-    ) as cur:
-        total, ok, fb, streams, first, last = await cur.fetchone()
-    if not total:
-        return stats
-
-    stats.update(
-        total_requests=total, error_count=total - (ok or 0), fallback_count=fb or 0,
-        stream_count=streams or 0, period_start=first, period_end=last,
-        success_rate_pct=round((ok or 0) / total * 100, 1),
-        fallback_rate_pct=round((fb or 0) / total * 100, 1),
-    )
-
-    for column, key in (("route", "requests_by_route"), ("backend", "requests_by_backend"),
-                        ("privacy", "privacy_breakdown")):
-        async with db.execute(
-            f"SELECT COALESCE({column}, 'unknown'), COUNT(*) FROM llm_requests GROUP BY 1"
-        ) as cur:
-            stats[key] = {name: n for name, n in await cur.fetchall()}
-
-    async with db.execute(
-        "SELECT COALESCE(backend, 'unknown'), COUNT(duration_ms), AVG(duration_ms) "
-        "FROM llm_requests WHERE duration_ms IS NOT NULL GROUP BY 1"
-    ) as cur:
-        per_backend = await cur.fetchall()
-    for backend, n, avg in per_backend:
-        stats["avg_latency_ms_by_backend"][backend] = int(avg)
-        idx = min(int(n * 0.95), n - 1)  # same nearest-rank rule as the old JSONL code
-        async with db.execute(
-            "SELECT duration_ms FROM llm_requests WHERE COALESCE(backend, 'unknown') = ? "
-            "AND duration_ms IS NOT NULL ORDER BY duration_ms LIMIT 1 OFFSET ?",
-            (backend, idx),
-        ) as cur:
-            stats["p95_latency_ms_by_backend"][backend] = (await cur.fetchone())[0]
-
-    return stats
 
 
 @app.get("/api/backends/health")
