@@ -8,6 +8,7 @@ committed config. Behaviour:
   so a browser can load the UI and then supply a key (see /static/auth.js).
 * Everything under ``/v1/``, ``/api/`` and the ``/chat/*`` POST helpers requires
   ``Authorization: Bearer <key>`` or ``x-api-key: <key>`` from non-loopback clients.
+* A key may carry a privacy floor: ``GATEWAY_API_KEYS=phone:personal,laptop``.
 * If ``security.require_api_key_for_lan`` is true but no keys are configured the
   gateway fails *open* (so an upgrade can't lock you out) and logs a loud warning.
 """
@@ -18,8 +19,12 @@ import hmac
 import logging
 import os
 
+from typing import Optional
+
 from fastapi import Request
 from fastapi.responses import JSONResponse
+
+from gateway.policy.privacy import PRIVACY_ORDER
 
 logger = logging.getLogger("gateway.auth")
 
@@ -28,8 +33,26 @@ _OPEN_EXACT = {"/api/health", "/api/docs", "/openapi.json"}
 _PROTECTED_PREFIXES = ("/v1/", "/api/", "/chat/extract", "/chat/memory/", "/chat/title")
 
 
+def parse_keys() -> list[tuple[str, Optional[str]]]:
+    """GATEWAY_API_KEYS entries as (key, privacy_floor). An entry is ``key`` or
+    ``key:tier`` (tier in public/personal/confidential/restricted); a client using
+    a floored key can't declare a less sensitive tier than the floor."""
+    out = []
+    for entry in os.environ.get("GATEWAY_API_KEYS", "").split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        key, _, tier = entry.partition(":")
+        tier = tier.strip().lower() or None
+        if tier and tier not in PRIVACY_ORDER:
+            logger.warning("Ignoring unknown privacy tier %r on an API key (valid: %s)", tier, ", ".join(PRIVACY_ORDER))
+            tier = None
+        out.append((key.strip(), tier))
+    return out
+
+
 def configured_keys() -> list[str]:
-    return [k.strip() for k in os.environ.get("GATEWAY_API_KEYS", "").split(",") if k.strip()]
+    return [k for k, _ in parse_keys() if k]
 
 
 def auth_status(security_config: dict, log: bool = False) -> str:
@@ -62,11 +85,18 @@ def _extract_key(request: Request) -> str:
     return request.headers.get("x-api-key", "").strip()
 
 
+def authenticate(presented: str) -> tuple[bool, Optional[str]]:
+    """(valid, privacy_floor) for a presented key. Compares against every key with
+    no early exit."""
+    ok, floor = False, None
+    for key, tier in parse_keys():
+        if key and hmac.compare_digest(presented.encode(), key.encode()):
+            ok, floor = True, tier
+    return ok, floor
+
+
 def key_is_valid(presented: str) -> bool:
-    ok = False
-    for k in configured_keys():  # compare against all keys; no early exit
-        ok |= hmac.compare_digest(presented.encode(), k.encode())
-    return ok
+    return authenticate(presented)[0]
 
 
 async def api_key_middleware(request: Request, call_next):
@@ -81,7 +111,9 @@ async def api_key_middleware(request: Request, call_next):
     if client_host in _LOOPBACK:
         return await call_next(request)
     presented = _extract_key(request)
-    if key_is_valid(presented):
+    valid, floor = authenticate(presented)
+    if valid:
+        request.state.privacy_floor = floor
         request.state.client_id = "key:" + hashlib.sha256(presented.encode()).hexdigest()[:12]
         return await call_next(request)
     return JSONResponse(

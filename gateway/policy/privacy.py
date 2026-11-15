@@ -1,6 +1,19 @@
 from fastapi import Header, Request
 from typing import Optional
 
+# Least to most sensitive. A key's privacy floor raises (never lowers) a request's tier.
+PRIVACY_ORDER = ["public", "personal", "confidential", "restricted"]
+
+
+def apply_privacy_floor(level: str, floor: Optional[str]) -> str:
+    """The effective tier: the more sensitive of what the client declared and the
+    floor tied to its API key. Unknown tiers are returned unchanged (route policy
+    blocks them anyway)."""
+    if not floor or level not in PRIVACY_ORDER or floor not in PRIVACY_ORDER:
+        return level
+    return max(level, floor, key=PRIVACY_ORDER.index)
+
+
 def extract_privacy_level(request_metadata: Optional[dict], x_ai_privacy: Optional[str], default_privacy: str = "personal") -> str:
     """
     Extracts the privacy level from the request.

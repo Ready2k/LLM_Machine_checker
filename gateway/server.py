@@ -33,7 +33,7 @@ from gateway.providers.ollama import OllamaProvider
 from gateway.providers.lmstudio import LMStudioProvider
 from gateway.providers.openai_compatible import OpenAICompatibleProvider, close_client
 from gateway.providers.sse import UsageTap
-from gateway.policy.privacy import extract_privacy_level, is_privacy_allowed, can_fallback_to_cloud, is_web_search_allowed
+from gateway.policy.privacy import extract_privacy_level, is_privacy_allowed, can_fallback_to_cloud, is_web_search_allowed, apply_privacy_floor
 from gateway.policy.routing import resolve_model_to_route, select_backend, select_backends
 from gateway.policy.autoroute import select_auto_route
 from gateway.policy.auth import api_key_middleware, auth_status
@@ -771,7 +771,8 @@ async def embeddings(request: Request):
 
 
 @app.post("/v1/chat/completions")
-async def chat_completions(request: ChatCompletionRequest, x_ai_privacy: Optional[str] = Header(None),
+async def chat_completions(request: ChatCompletionRequest, raw_request: Request,
+                           x_ai_privacy: Optional[str] = Header(None),
                            x_ai_web_search: Optional[str] = Header(None)):
     correlation_id = str(uuid.uuid4())
     if not request.metadata:
@@ -793,6 +794,8 @@ async def chat_completions(request: ChatCompletionRequest, x_ai_privacy: Optiona
 
     # 1. Privacy
     privacy_level = extract_privacy_level(request.metadata, x_ai_privacy, security_config.get("default_privacy", "personal"))
+    # A key's privacy floor (GATEWAY_API_KEYS=key:tier) can raise the declared tier, never lower it.
+    privacy_level = apply_privacy_floor(privacy_level, getattr(raw_request.state, "privacy_floor", None))
 
     # 1b. Web grounding requested? Via model alias, header, or metadata. The
     #     alias is rewritten to "auto" so route selection runs on the clean
