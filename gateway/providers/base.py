@@ -1,5 +1,5 @@
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 class BackendHealth(BaseModel):
     id: str
@@ -16,7 +16,21 @@ class ModelInfo(BaseModel):
     object: str = "model"
     owned_by: str = "local-ai-fabric"
 
+# OpenAI-style request fields forwarded to the backend untouched when a client
+# sends them (JSON mode, tools, sampling, stop sequences, ...).
+PASSTHROUGH_PARAMS = (
+    "top_p", "top_k", "min_p", "stop", "seed", "n",
+    "presence_penalty", "frequency_penalty", "repeat_penalty", "logit_bias",
+    "logprobs", "top_logprobs",
+    "response_format", "tools", "tool_choice", "parallel_tool_calls",
+    "stream_options",
+)
+
+
 class ChatCompletionRequest(BaseModel):
+    # Keep unknown fields so passthrough params survive model_copy() / routing.
+    model_config = ConfigDict(extra="allow")
+
     model: str
     messages: List[Dict[str, Any]]
     temperature: Optional[float] = None

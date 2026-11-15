@@ -1,7 +1,23 @@
 import time
 import httpx
 from typing import List, Optional
-from .base import Provider, BackendHealth, ModelInfo, ChatCompletionRequest, ChatCompletionResponse
+from .base import Provider, BackendHealth, ModelInfo, ChatCompletionRequest, ChatCompletionResponse, PASSTHROUGH_PARAMS
+
+def build_payload(request: ChatCompletionRequest, mapped_model: str, stream: bool) -> dict:
+    """Backend request body: the core fields plus any allow-listed passthrough params."""
+    payload = {"model": mapped_model, "messages": request.messages, "stream": stream}
+    if request.metadata and request.metadata.get("correlation_id"):
+        payload["user"] = request.metadata["correlation_id"]
+    if request.temperature is not None:
+        payload["temperature"] = request.temperature
+    if request.max_tokens is not None:
+        payload["max_tokens"] = request.max_tokens
+    extra = request.model_extra or {}
+    for key in PASSTHROUGH_PARAMS:
+        if extra.get(key) is not None:
+            payload[key] = extra[key]
+    return payload
+
 
 class OpenAICompatibleProvider(Provider):
     """Generic OpenAI-compatible provider."""
@@ -68,17 +84,7 @@ class OpenAICompatibleProvider(Provider):
         if request.metadata and request.metadata.get("correlation_id"):
             url += f"?trace_id={request.metadata['correlation_id']}"
         
-        payload = {
-            "model": mapped_model,
-            "messages": request.messages,
-            "stream": True,
-        }
-        if request.metadata and request.metadata.get("correlation_id"):
-            payload["user"] = request.metadata["correlation_id"]
-        if request.temperature is not None:
-            payload["temperature"] = request.temperature
-        if request.max_tokens is not None:
-            payload["max_tokens"] = request.max_tokens
+        payload = build_payload(request, mapped_model, True)
 
         async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=5.0)) as client:
             async with client.stream("POST", url, json=payload) as resp:
@@ -91,17 +97,7 @@ class OpenAICompatibleProvider(Provider):
         if request.metadata and request.metadata.get("correlation_id"):
             url += f"?trace_id={request.metadata['correlation_id']}"
         
-        payload = {
-            "model": mapped_model,
-            "messages": request.messages,
-            "stream": request.stream
-        }
-        if request.metadata and request.metadata.get("correlation_id"):
-            payload["user"] = request.metadata["correlation_id"]
-        if request.temperature is not None:
-            payload["temperature"] = request.temperature
-        if request.max_tokens is not None:
-            payload["max_tokens"] = request.max_tokens
+        payload = build_payload(request, mapped_model, request.stream)
 
         async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=5.0)) as client:
             resp = await client.post(url, json=payload)
