@@ -6,8 +6,19 @@ import respx
 
 client = TestClient(app)
 
+FIXTURE_BACKENDS = {"backends": {
+    "pc-rtx2070": {"role": "local_fast", "runtime": "ollama", "endpoint": "http://desktop-homepc.local:11434",
+                   "enabled": True, "inference_enabled": True},
+    "macbook-m4pro": {"role": "local_quality", "runtime": "lmstudio", "endpoint": "http://Jamess-MacBook-Pro-2.local:1234",
+                      "enabled": True, "inference_enabled": True},
+}}
+
+
 @respx.mock
-def test_backend_health_returns_structured_status():
+def test_backend_health_returns_structured_status(monkeypatch):
+    # Independent of the (locally modified) config/backends.yaml.
+    import gateway.server as server
+    monkeypatch.setattr(server, "load_backends_config", lambda: FIXTURE_BACKENDS)
     # Mock PC is up
     respx.get("http://desktop-homepc.local:11434/api/tags").mock(
         return_value=httpx.Response(200, json={"models": [{"name": "qwen2.5-coder:7b"}]})
