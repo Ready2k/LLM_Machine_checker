@@ -938,7 +938,9 @@ async def chat_completions(request: ChatCompletionRequest, x_ai_privacy: Optiona
             continue
 
         latency_ms = int((time.time() - start_time) * 1000)
-        log_routing_decision(route_name, request.model, privacy_level, backend_id, fallback_used, "success", error=auto_reason, latency_ms=latency_ms, correlation_id=correlation_id)
+        usage = response.usage or {}
+        log_routing_decision(route_name, request.model, privacy_level, backend_id, fallback_used, "success", error=auto_reason, latency_ms=latency_ms, correlation_id=correlation_id,
+                             tokens_in=usage.get("prompt_tokens"), tokens_out=usage.get("completion_tokens"))
         log_llm_event(correlation_id, "request.complete", "Request completed successfully", {"latency_ms": latency_ms})
         return JSONResponse(content=response.model_dump(), headers=build_headers(backend_id))
 

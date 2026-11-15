@@ -119,7 +119,9 @@ def log_routing_decision(
     ttft_ms: Optional[int] = None,
     latency_ms: Optional[int] = None,
     stream: bool = False,
-    correlation_id: str = "unknown"
+    correlation_id: str = "unknown",
+    tokens_in: Optional[int] = None,
+    tokens_out: Optional[int] = None,
 ):
     now = datetime.now(timezone.utc).isoformat()
     log_llm_request(
@@ -135,5 +137,7 @@ def log_routing_decision(
         ttft_ms=ttft_ms,
         fallback_used=fallback_used,
         is_stream=stream,
-        error_code=error
+        error_code=error,
+        tokens_in=tokens_in,
+        tokens_out=tokens_out,
     )
