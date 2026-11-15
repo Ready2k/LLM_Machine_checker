@@ -28,13 +28,21 @@ PAGE_ONE = "http://example.com/trams"
 PAGE_TWO = "http://example.com/empty"
 
 
-_REAL_HOST_IS_PUBLIC = ws._host_is_public  # captured before the autouse stub
+_REAL_RESOLVE = ws._resolve_public_ip  # captured before the autouse stub
+EXAMPLE_IP = "93.184.216.34"
+
+
+def ip(url: str) -> str:
+    """The URL the pinned transport actually connects to for an example.com page."""
+    return url.replace("example.com", EXAMPLE_IP)
 
 
 @pytest.fixture(autouse=True)
 def _offline_dns(monkeypatch):
-    """Keep the SSRF guard hermetic: treat example.com as public, no real DNS."""
-    monkeypatch.setattr(ws, "_host_is_public", lambda host: host.endswith("example.com"))
+    """Hermetic SSRF guard: example.com resolves to a fixed public IP; everything
+    else is treated as non-public. No real DNS."""
+    monkeypatch.setattr(ws, "_resolve_public_ip",
+                        lambda host: EXAMPLE_IP if host.endswith("example.com") else None)
 
 
 def _stub_trafilatura(monkeypatch):
@@ -104,8 +112,8 @@ def test_searxng_url_env_override(monkeypatch):
 def test_gather_fetches_extracts_and_drops_empty(monkeypatch):
     _stub_trafilatura(monkeypatch)
     respx.get(url__regex=SEARX).mock(return_value=_searx_response(PAGE_ONE, PAGE_TWO))
-    respx.get(PAGE_ONE).mock(return_value=httpx.Response(200, text="<html>NO_TRAMS_HERE</html>"))
-    respx.get(PAGE_TWO).mock(return_value=httpx.Response(200, text="<html>DROP_ME</html>"))
+    respx.get(ip(PAGE_ONE)).mock(return_value=httpx.Response(200, text="<html>NO_TRAMS_HERE</html>"))
+    respx.get(ip(PAGE_TWO)).mock(return_value=httpx.Response(200, text="<html>DROP_ME</html>"))
 
     c = WebSearchClient({"enabled": True, "searxng_url": "http://searxng.lan:8080", "n_results": 5})
     sources = asyncio.run(c.gather("can i get a tram"))
@@ -120,7 +128,7 @@ def test_gather_fetches_extracts_and_drops_empty(monkeypatch):
 def test_gather_truncates_per_source(monkeypatch):
     _stub_trafilatura(monkeypatch)
     respx.get(url__regex=SEARX).mock(return_value=_searx_response(PAGE_ONE))
-    respx.get(PAGE_ONE).mock(return_value=httpx.Response(200, text="X" * 10000))
+    respx.get(ip(PAGE_ONE)).mock(return_value=httpx.Response(200, text="X" * 10000))
 
     c = WebSearchClient({"enabled": True, "searxng_url": "http://searxng.lan:8080",
                          "max_chars_per_source": 100})
@@ -136,8 +144,8 @@ def test_gather_truncates_per_source(monkeypatch):
 def test_web_grounding_injects_sources_via_header(monkeypatch):
     _stub_trafilatura(monkeypatch)
     respx.get(url__regex=SEARX).mock(return_value=_searx_response(PAGE_ONE, PAGE_TWO))
-    respx.get(PAGE_ONE).mock(return_value=httpx.Response(200, text="<html>FACT_NO_TRAMS</html>"))
-    respx.get(PAGE_TWO).mock(return_value=httpx.Response(200, text="<html>SECOND_PAGE</html>"))
+    respx.get(ip(PAGE_ONE)).mock(return_value=httpx.Response(200, text="<html>FACT_NO_TRAMS</html>"))
+    respx.get(ip(PAGE_TWO)).mock(return_value=httpx.Response(200, text="<html>SECOND_PAGE</html>"))
     backend = respx.post(OLLAMA_URL).mock(return_value=_completion())
 
     resp = client.post(
@@ -167,7 +175,7 @@ def test_web_grounding_injects_sources_via_header(monkeypatch):
 def test_web_alias_triggers_grounding(monkeypatch):
     _stub_trafilatura(monkeypatch)
     respx.get(url__regex=SEARX).mock(return_value=_searx_response(PAGE_ONE))
-    respx.get(PAGE_ONE).mock(return_value=httpx.Response(200, text="<html>BODY</html>"))
+    respx.get(ip(PAGE_ONE)).mock(return_value=httpx.Response(200, text="<html>BODY</html>"))
     # auto-routing may pick either local backend — mock both.
     respx.post(OLLAMA_URL).mock(return_value=_completion())
     respx.post(LMSTUDIO_URL).mock(return_value=_completion())
@@ -247,11 +255,11 @@ def test_web_grounding_unavailable_when_disabled(monkeypatch):
 @pytest.mark.parametrize("host", ["127.0.0.1", "10.0.0.5", "192.168.1.1", "169.254.169.254",
                                   "::1", "0.0.0.0", "224.0.0.1"])
 def test_host_is_public_blocks_internal_addresses(host):
-    assert not _REAL_HOST_IS_PUBLIC(host)
+    assert _REAL_RESOLVE(host) is None
 
 
 def test_host_is_public_allows_global_ip():
-    assert _REAL_HOST_IS_PUBLIC("8.8.8.8")
+    assert _REAL_RESOLVE("8.8.8.8") == "8.8.8.8"
 
 
 @respx.mock
@@ -260,7 +268,7 @@ def test_gather_skips_internal_urls(monkeypatch):
     internal = "http://192.168.1.1/admin"
     respx.get(url__regex=SEARX).mock(return_value=_searx_response(internal, PAGE_ONE))
     hit = respx.get(internal).mock(return_value=httpx.Response(200, text="<html>SECRET</html>"))
-    respx.get(PAGE_ONE).mock(return_value=httpx.Response(200, text="<html>PUBLIC</html>"))
+    respx.get(ip(PAGE_ONE)).mock(return_value=httpx.Response(200, text="<html>PUBLIC</html>"))
     c = WebSearchClient({"enabled": True, "searxng_url": "http://searxng.lan:8080", "n_results": 5})
     sources = asyncio.run(c.gather("q"))
     assert [s.url for s in sources] == [PAGE_ONE]
@@ -271,7 +279,7 @@ def test_gather_skips_internal_urls(monkeypatch):
 def test_redirect_to_internal_host_is_blocked(monkeypatch):
     _stub_trafilatura(monkeypatch)
     respx.get(url__regex=SEARX).mock(return_value=_searx_response(PAGE_ONE))
-    respx.get(PAGE_ONE).mock(return_value=httpx.Response(302, headers={"location": "http://169.254.169.254/latest"}))
+    respx.get(ip(PAGE_ONE)).mock(return_value=httpx.Response(302, headers={"location": "http://169.254.169.254/latest"}))
     meta = respx.get("http://169.254.169.254/latest").mock(return_value=httpx.Response(200, text="<html>CREDS</html>"))
     c = WebSearchClient({"enabled": True, "searxng_url": "http://searxng.lan:8080"})
     assert asyncio.run(c.gather("q")) == []
@@ -294,3 +302,67 @@ def test_inject_grounding_handles_structured_content():
     out = inject_grounding(msgs, [Source(n=1, title="t", url="http://example.com", text="body")])
     assert out[-1]["content"][0]["type"] == "text" and "<web_sources>" in out[-1]["content"][0]["text"]
     assert msgs[0]["content"] == [{"type": "text", "text": "q"}]  # input not mutated
+
+
+# --------------------------------------------------------------------------- #
+# DNS pinning (anti-rebinding)
+# --------------------------------------------------------------------------- #
+
+def _capture_transport(monkeypatch):
+    seen = []
+
+    async def fake(self, request):
+        seen.append(request)
+        return httpx.Response(200, text="ok", request=request)
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", fake)
+    return seen
+
+
+def test_pinned_transport_connects_to_resolved_ip_keeping_host_and_sni(monkeypatch):
+    seen = _capture_transport(monkeypatch)
+
+    async def go():
+        async with httpx.AsyncClient(transport=ws.PinnedTransport()) as c:
+            return await c.get("https://example.com:8443/p?q=1")
+    asyncio.run(go())
+    req = seen[0]
+    assert req.url.host == EXAMPLE_IP and req.url.port == 8443 and req.url.path == "/p"
+    assert req.headers["host"] == "example.com:8443"            # original Host preserved
+    assert req.extensions["sni_hostname"] == "example.com"       # TLS verifies the real name
+
+
+def test_rebinding_is_defeated_because_resolution_happens_once_per_request(monkeypatch):
+    """A hostile resolver answers public first, internal after. The request must
+    already be bound to the first (validated) answer."""
+    answers = iter([EXAMPLE_IP, "169.254.169.254"])
+    monkeypatch.setattr(ws, "_resolve_public_ip", lambda host: next(answers, None))
+    seen = _capture_transport(monkeypatch)
+
+    async def go():
+        async with httpx.AsyncClient(transport=ws.PinnedTransport()) as c:
+            await c.get("http://rebind.example.com/")
+    asyncio.run(go())
+    assert [r.url.host for r in seen] == [EXAMPLE_IP]            # never the second answer
+
+
+def test_pinned_transport_blocks_non_public(monkeypatch):
+    monkeypatch.setattr(ws, "_resolve_public_ip", lambda host: None)
+    seen = _capture_transport(monkeypatch)
+
+    async def go():
+        async with httpx.AsyncClient(transport=ws.PinnedTransport()) as c:
+            await c.get("http://internal.test/")
+    with pytest.raises(httpx.ConnectError):
+        asyncio.run(go())
+    assert seen == []                                            # nothing was sent
+
+
+def test_pinned_transport_leaves_ip_literal_urls_alone(monkeypatch):
+    monkeypatch.setattr(ws, "_resolve_public_ip", lambda host: host)   # literal resolves to itself
+    seen = _capture_transport(monkeypatch)
+
+    async def go():
+        async with httpx.AsyncClient(transport=ws.PinnedTransport()) as c:
+            await c.get("http://8.8.8.8/x")
+    asyncio.run(go())
+    assert seen[0].url.host == "8.8.8.8" and "sni_hostname" not in seen[0].extensions

@@ -53,34 +53,54 @@ MAX_REDIRECTS = 3
 MAX_FETCH_BYTES = 2_000_000
 
 
-def _host_is_public(host: str) -> bool:
-    """SSRF guard: True only if *every* address the host resolves to is a public,
-    globally-routable IP. Blocks loopback, RFC1918, link-local (cloud metadata),
-    multicast, reserved and unspecified ranges. Unresolvable hosts are blocked.
-
-    Note: resolve-then-connect leaves a small DNS-rebinding window; for a hostile
-    environment, run the gateway behind an egress firewall as well."""
+def _resolve_public_ip(host: str) -> Optional[str]:
+    """SSRF guard: resolve ``host`` and return one of its addresses, but only if
+    *every* address is a public, globally-routable IP. Blocks loopback, RFC1918,
+    link-local (cloud metadata), multicast, reserved and unspecified ranges.
+    Unresolvable hosts return None. The caller connects to the returned IP (see
+    PinnedTransport), so a hostname can't resolve differently at connect time."""
     try:
         infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
     except OSError:
-        return False
-    if not infos:
-        return False
+        return None
+    first: Optional[str] = None
     for info in infos:
+        addr = info[4][0].split("%")[0]
         try:
-            ip = ipaddress.ip_address(info[4][0].split("%")[0])
+            ip = ipaddress.ip_address(addr)
         except ValueError:
-            return False
+            return None
         if not ip.is_global or ip.is_multicast:
-            return False
-    return True
+            return None
+        first = first or addr
+    return first
 
 
-async def _url_is_safe(url: str) -> bool:
+def _host_is_public(host: str) -> bool:
+    return _resolve_public_ip(host) is not None
+
+
+class PinnedTransport(httpx.AsyncHTTPTransport):
+    """Transport that defeats DNS rebinding: for every request (including each
+    redirect hop) it resolves the host once, rejects non-public addresses, then
+    connects to that exact IP. The Host header and TLS SNI/certificate check keep
+    using the original hostname, so HTTPS still verifies the real site."""
+
+    async def handle_async_request(self, request: httpx.Request):
+        host = request.url.host
+        ip = await asyncio.get_running_loop().run_in_executor(None, _resolve_public_ip, host)
+        if not ip:
+            raise httpx.ConnectError(f"blocked non-public or unresolvable host: {host}")
+        if ip != host:
+            request.extensions = {**request.extensions, "sni_hostname": host}
+            request.url = request.url.copy_with(host=ip)  # Host header was set from the original URL
+        return await super().handle_async_request(request)
+
+
+def _url_is_safe(url: str) -> bool:
+    """Cheap pre-check (scheme/host). Address validation happens in PinnedTransport."""
     parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https") or not parsed.hostname:
-        return False
-    return await asyncio.get_running_loop().run_in_executor(None, _host_is_public, parsed.hostname)
+    return parsed.scheme in ("http", "https") and bool(parsed.hostname)
 
 
 def _neutralize(text: str) -> str:
@@ -193,7 +213,7 @@ class WebSearchClient:
         """GET with manual redirect handling so every hop is SSRF-checked, and a
         hard cap on bytes read. Returns '' on any problem/blocked URL."""
         for _ in range(MAX_REDIRECTS + 1):
-            if not await _url_is_safe(url):
+            if not _url_is_safe(url):
                 return ""
             async with client.stream("GET", url) as resp:
                 if resp.is_redirect:
@@ -233,9 +253,11 @@ class WebSearchClient:
     async def fetch_all(self, sources: list[Source]) -> None:
         """Fetch + extract every source concurrently, in place."""
         async with httpx.AsyncClient(
+            transport=PinnedTransport(),
+            trust_env=False,  # env proxies would bypass the pinned transport (and its SSRF check)
             timeout=self.fetch_timeout,
             headers={"User-Agent": self.user_agent},
-            follow_redirects=False,  # redirects are followed manually, SSRF-checked per hop
+            follow_redirects=False,  # redirects are followed manually; each hop is re-resolved and pinned
         ) as client:
             await asyncio.gather(*(self._fetch_one(client, s) for s in sources))
 
