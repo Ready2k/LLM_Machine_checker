@@ -10,4 +10,3 @@ telemetry:
   enabled: true
   log_prompts: false
   log_completions: false
-  path: data/telemetry/gateway-events.jsonl
