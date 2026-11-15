@@ -19,14 +19,14 @@ models:
 
   local-quality:
     route: local-quality
-    model: qwen2.5-coder-14b-instruct-uncensored
-    provider: lmstudio
+    model: vMLX_qwen3.6-27b
+    provider: openai_compatible
     purpose: higher quality local reasoning/coding
 
   private-docs:
     route: private-docs
-    model: qwen2.5-coder-14b-instruct-uncensored
-    provider: lmstudio
+    model: vMLX_qwen3.6-27b
+    provider: openai_compatible
     purpose: local-only private document work
 
   local-fast-llama:
@@ -41,11 +41,11 @@ models:
     provider: ollama
     purpose: lightweight fast local chat
 
-  local-quality-gemma:
-    route: local-quality
-    model: google/gemma-4-e4b
-    provider: lmstudio
-    purpose: fast quality local chat (Gemma 4 4B on M4)
+  sim:
+    route: local-fast-apple
+    model: ~/.cache/huggingface/hub/mjdillon/gemma-3-12b-it-qat-mlx-4Bit
+    provider: openai_compatible
+    purpose: generative agents simulation — fast structured output (Gemma 3 12B QAT)
 
   cloud-best:
     route: cloud-best

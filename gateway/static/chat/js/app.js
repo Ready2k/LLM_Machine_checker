@@ -93,7 +93,7 @@ const LABELS = {
   'private-docs':        'Private Docs',
   'local-fast-llama':    'Fast · Llama 3.1',
   'local-fast-gemma':    'Fast · Gemma 2',
-  'local-quality-gemma': 'Quality · Gemma 4',
+  'sim':                 'Sim · Gemma 3 12B',
 };
 
 async function loadModels() {

@@ -26,6 +26,15 @@ routes:
       - confidential
       - restricted
 
+  local-fast-apple:
+    primary: macbook-m4pro-fast
+    fallback: pc-rtx2070
+    cloud_fallback: false
+    privacy_allowed:
+      - public
+      - personal
+      - confidential
+
   cloud-best:
     primary: null
     fallback: null

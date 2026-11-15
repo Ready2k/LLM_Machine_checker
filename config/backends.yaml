@@ -8,20 +8,28 @@ backends:
     inference_enabled: true
     health_path: /api/tags
     agent_url: http://Desktop-HomePC.local:8081
-    agent_secret: default-node-secret-change-me
     notes: Fast local CUDA node. Best for 7B/8B local models.
 
   macbook-m4pro:
     role: local_quality
-    runtime: lmstudio
-    endpoint: http://Jamess-MacBook-Pro-2.local:1234
-    openai_endpoint: http://Jamess-MacBook-Pro-2.local:1234/v1
+    runtime: openai_compatible
+    endpoint: http://Jamess-MacBook-Pro-2.local:8001
+    openai_endpoint: http://Jamess-MacBook-Pro-2.local:8001/v1
     enabled: true
     inference_enabled: true
     health_path: /v1/models
     agent_url: http://Jamess-MacBook-Pro-2.local:8081
-    agent_secret: default-node-secret-change-me
-    notes: Quality local Metal node. Best for 14B-ish quantized models.
+    notes: Quality local Metal node — mlx.studio serving Qwen3.6-27B JANG_4M-CRACK.
+
+  macbook-m4pro-fast:
+    role: local_fast_apple
+    runtime: openai_compatible
+    endpoint: http://Jamess-MacBook-Pro-2.local:8002
+    openai_endpoint: http://Jamess-MacBook-Pro-2.local:8002/v1
+    enabled: true
+    inference_enabled: true
+    health_path: /v1/models
+    notes: Fast Metal node — mlx-lm serving Gemma 3 12B QAT (simulation/chat-large workloads).
 
   old-macbook:
     role: utility_node
