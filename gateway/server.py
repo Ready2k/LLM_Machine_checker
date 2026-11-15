@@ -38,7 +38,7 @@ from gateway.policy.autoroute import select_auto_route
 from gateway.policy.auth import api_key_middleware, auth_status
 from gateway.tools.websearch import WebSearchClient, inject_grounding
 from gateway.telemetry.events import log_routing_decision, log_llm_event, _load_telemetry_config
-from gateway.telemetry.database import init_db, close_db
+from gateway.telemetry.database import init_db, close_db, get_db
 from gateway.api_observability import router as observability_router
 from gateway.chat_helpers import (
     router as chat_helpers_router,
@@ -532,52 +532,44 @@ async def run_profile():
     return ProfileRunResponse(status="ok", profile=profile_data)
 
 
+def _request_row_to_event(row) -> dict:
+    """llm_requests row -> the event shape /api/events has always returned."""
+    (ts, route, backend, model, privacy, status, ttft, dur, fb, err, stream, tin, tout) = row
+    return {
+        "timestamp": ts, "event_type": "chat_completion", "route": route, "backend": backend,
+        "model": model, "privacy": privacy, "ttft_ms": ttft, "latency_ms": dur,
+        "fallback_used": bool(fb), "status": status, "error_code": err,
+        "stream": bool(stream), "tokens_in": tin, "tokens_out": tout,
+    }
+
+
 @app.get("/api/events")
 async def get_events(limit: int = 100, status: str = "all"):
-    """Return the latest telemetry events from the JSONL log."""
+    """Latest routing events (newest first) from the SQLite telemetry store."""
     limit = min(max(1, limit), 500)
-    config = _load_telemetry_config()
-    log_path_str = config.get("path", "data/telemetry/gateway-events.jsonl")
-    log_path = PROJECT_ROOT / log_path_str
-
-    if not log_path.exists():
+    db = await get_db()
+    if not db:
         return {"events": [], "total_on_disk": 0, "returned": 0}
 
-    events = []
-    total = 0
-    try:
-        with open(log_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    event = json.loads(line)
-                    total += 1
-                    if status != "all" and event.get("status") != status:
-                        continue
-                    events.append(event)
-                except json.JSONDecodeError:
-                    pass
-    except OSError:
-        pass
+    async with db.execute("SELECT COUNT(*) FROM llm_requests") as cur:
+        total = (await cur.fetchone())[0]
+    where, params = ("", ())
+    if status != "all":
+        where, params = ("WHERE status = ?", (status,))
+    async with db.execute(
+        "SELECT timestamp_start, route, backend, model, privacy, status, time_to_first_token_ms, "
+        "duration_ms, fallback_used, error_code, is_stream, tokens_in, tokens_out "
+        f"FROM llm_requests {where} ORDER BY timestamp_start DESC LIMIT ?",
+        (*params, limit),
+    ) as cur:
+        events = [_request_row_to_event(r) for r in await cur.fetchall()]
 
-    events.reverse()
-    returned_events = events[:limit]
-    
-    return {
-        "events": returned_events,
-        "total_on_disk": total,
-        "returned": len(returned_events)
-    }
+    return {"events": events, "total_on_disk": total, "returned": len(events)}
+
 
 @app.get("/api/stats")
 async def get_stats():
-    """Return aggregate statistics from the telemetry log."""
-    config = _load_telemetry_config()
-    log_path_str = config.get("path", "data/telemetry/gateway-events.jsonl")
-    log_path = PROJECT_ROOT / log_path_str
-
+    """Aggregate routing statistics from the SQLite telemetry store."""
     stats = {
         "total_requests": 0,
         "success_rate_pct": 0.0,
@@ -591,72 +583,48 @@ async def get_stats():
         "privacy_breakdown": {},
         "stream_count": 0,
         "period_start": None,
-        "period_end": None
+        "period_end": None,
     }
-
-    if not log_path.exists():
+    db = await get_db()
+    if not db:
         return stats
 
-    success_count = 0
-    latencies_by_backend = {}
-    
-    try:
-        with open(log_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    event = json.loads(line)
-                    stats["total_requests"] += 1
-                    
-                    if not stats["period_start"]:
-                        stats["period_start"] = event.get("timestamp")
-                    stats["period_end"] = event.get("timestamp")
-                    
-                    if event.get("status") == "success":
-                        success_count += 1
-                    else:
-                        stats["error_count"] += 1
-                        
-                    if event.get("fallback_used"):
-                        stats["fallback_count"] += 1
-                        
-                    route = event.get("route", "unknown")
-                    stats["requests_by_route"][route] = stats["requests_by_route"].get(route, 0) + 1
-                    
-                    backend = event.get("backend", "unknown")
-                    stats["requests_by_backend"][backend] = stats["requests_by_backend"].get(backend, 0) + 1
-                    
-                    privacy = event.get("privacy", "unknown")
-                    stats["privacy_breakdown"][privacy] = stats["privacy_breakdown"].get(privacy, 0) + 1
-                    
-                    if event.get("stream"):
-                        stats["stream_count"] += 1
-                        
-                    lat = event.get("latency_ms")
-                    if lat is not None:
-                        if backend not in latencies_by_backend:
-                            latencies_by_backend[backend] = []
-                        latencies_by_backend[backend].append(lat)
-                        
-                except json.JSONDecodeError:
-                    pass
-    except OSError:
-        pass
+    async with db.execute(
+        "SELECT COUNT(*), SUM(status = 'success'), SUM(COALESCE(fallback_used, 0)), "
+        "SUM(COALESCE(is_stream, 0)), MIN(timestamp_start), MAX(timestamp_start) FROM llm_requests"
+    ) as cur:
+        total, ok, fb, streams, first, last = await cur.fetchone()
+    if not total:
+        return stats
 
-    if stats["total_requests"] > 0:
-        stats["success_rate_pct"] = round((success_count / stats["total_requests"]) * 100, 1)
-        stats["fallback_rate_pct"] = round((stats["fallback_count"] / stats["total_requests"]) * 100, 1)
+    stats.update(
+        total_requests=total, error_count=total - (ok or 0), fallback_count=fb or 0,
+        stream_count=streams or 0, period_start=first, period_end=last,
+        success_rate_pct=round((ok or 0) / total * 100, 1),
+        fallback_rate_pct=round((fb or 0) / total * 100, 1),
+    )
 
-    for backend, lats in latencies_by_backend.items():
-        if lats:
-            stats["avg_latency_ms_by_backend"][backend] = int(sum(lats) / len(lats))
-            lats.sort()
-            idx = int(len(lats) * 0.95)
-            if idx >= len(lats):
-                idx = len(lats) - 1
-            stats["p95_latency_ms_by_backend"][backend] = lats[idx]
+    for column, key in (("route", "requests_by_route"), ("backend", "requests_by_backend"),
+                        ("privacy", "privacy_breakdown")):
+        async with db.execute(
+            f"SELECT COALESCE({column}, 'unknown'), COUNT(*) FROM llm_requests GROUP BY 1"
+        ) as cur:
+            stats[key] = {name: n for name, n in await cur.fetchall()}
+
+    async with db.execute(
+        "SELECT COALESCE(backend, 'unknown'), COUNT(duration_ms), AVG(duration_ms) "
+        "FROM llm_requests WHERE duration_ms IS NOT NULL GROUP BY 1"
+    ) as cur:
+        per_backend = await cur.fetchall()
+    for backend, n, avg in per_backend:
+        stats["avg_latency_ms_by_backend"][backend] = int(avg)
+        idx = min(int(n * 0.95), n - 1)  # same nearest-rank rule as the old JSONL code
+        async with db.execute(
+            "SELECT duration_ms FROM llm_requests WHERE COALESCE(backend, 'unknown') = ? "
+            "AND duration_ms IS NOT NULL ORDER BY duration_ms LIMIT 1 OFFSET ?",
+            (backend, idx),
+        ) as cur:
+            stats["p95_latency_ms_by_backend"][backend] = (await cur.fetchone())[0]
 
     return stats
 
