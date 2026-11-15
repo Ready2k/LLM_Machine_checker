@@ -244,6 +244,32 @@ header { display: flex; align-items: center; gap: 10px;
 .fb-btn:hover { color: var(--text); border-color: var(--accent); }
 .fb-share { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; }
 @media (hover: none) { .fb-btn { padding: 6px 10px; font-size: 12px; } }
+/* Signal Console strip — scoped under .badge .fb so it doesn't fight .badge span */
+.badge .fb { display: flex; flex: 1 1 100%; flex-wrap: wrap; gap: 8px 10px; align-items: center;
+  margin-top: 6px; padding: 4px 6px 4px 12px; background: #0f161c; border: 1px solid #1d2a33;
+  border-left: 2px solid #2dd4bf; border-radius: 8px; }
+.badge .fb span { background: none; border: none; padding: 0; }
+.badge .fb .fb-info { flex: 1 1 12rem; min-width: 0; min-height: 44px; display: flex; gap: 6px; align-items: center;
+  font-size: 12px; color: #9aa7b0; cursor: pointer; border-radius: 4px; }
+.badge .fb .fb-info:focus-visible { outline: 2px solid rgba(45,212,191,.5); outline-offset: 2px; }
+.badge .fb .fb-route { font: 600 12px ui-monospace, "SF Mono", Menlo, monospace; color: #2dd4bf; flex-shrink: 0; }
+.badge .fb .fb-sep { color: #4b5963; }
+.badge .fb .fb-why { color: #b4c0c8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.badge .fb .fb-more { color: #4b5963; font-size: 10px; transition: transform .15s; }
+.badge .fb .fb-info[aria-expanded="true"] .fb-more { transform: rotate(180deg); }
+.badge .fb .fb-detail { flex: 1 1 100%; font: 11px/1.45 ui-monospace, "SF Mono", Menlo, monospace; color: #6f7d87;
+  word-break: break-word; padding: 0 0 6px; }
+.badge .fb .fb-detail[hidden] { display: none; }
+.badge .fb .fb-btn { min-height: 44px; min-width: 44px; padding: 0 14px; font-size: 12px; font-weight: 600;
+  color: #cfe9e5; background: rgba(45,212,191,.08); border: 1px solid rgba(45,212,191,.45); border-radius: 6px; }
+.badge .fb .fb-btn:hover, .badge .fb .fb-btn:focus-visible { background: rgba(45,212,191,.18); border-color: #2dd4bf; color: #fff; outline: none; }
+.badge .fb .fb-btn:focus-visible { box-shadow: 0 0 0 2px rgba(45,212,191,.4); }
+.badge .fb .fb-ask { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: #8a98a2; }
+.badge .fb .fb-opts { display: flex; flex-wrap: wrap; gap: 8px; }
+.badge .fb .fb-share { flex: 1 1 100%; min-height: 44px; gap: 8px; font-size: 12px; color: #8a98a2;
+  border-top: 1px solid #1d2a33; margin-top: 2px; }
+.badge .fb .fb-share input { width: 18px; height: 18px; accent-color: #2dd4bf; }
+.badge .fb .fb-done { font: 12px ui-monospace, "SF Mono", Menlo, monospace; color: #8a98a2; padding: 10px 0; }
 
 /* Typing dots */
 .dots { display: inline-flex; gap: 5px; padding: 6px 0; }

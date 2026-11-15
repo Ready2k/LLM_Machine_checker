@@ -10,10 +10,13 @@ document.addEventListener("DOMContentLoaded", () => {
     const chips = document.getElementById('rt-chips');
     const routesBody = document.querySelector('#rt-routes-table tbody');
     const decisionsBody = document.querySelector('#rt-decisions-table tbody');
+    const cardsBox = document.getElementById('rt-cards');
+    const pickBox = document.getElementById('rt-routepick');
     const candidatesBox = document.getElementById('rt-candidates');
     const CHOICES = [['fast', 'local-fast'], ['quality', 'local-quality'], ['private', 'private-docs']];
     let win = '24h';
     let stats = null;
+    let selRoute = null;
 
     const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -32,12 +35,29 @@ document.addEventListener("DOMContentLoaded", () => {
             <span class="obs-stat-chip">promoted to tests: ${num(fb.promoted)}</span>`;
         const names = Object.keys(w.routes).sort((a, b) => w.routes[b].requests - w.routes[a].requests);
         if (!names.length) {
+            pickBox.innerHTML = '';
+            cardsBox.innerHTML = '';
             routesBody.innerHTML = empty(8, `No model:"auto" requests in the last ${win}.`);
             return;
         }
+        // Cards come from ONE route's stats — percentiles are never averaged across routes.
+        if (!selRoute || !w.routes[selRoute]) selRoute = names[0];
+        pickBox.innerHTML = names.map((n) => `<button type="button" class="rt-pick${n === selRoute ? ' active' : ''}" data-route="${esc(n)}" aria-pressed="${n === selRoute}">${esc(n)}</button>`).join('');
+        const sr = w.routes[selRoute];
+        cardsBox.innerHTML = `
+            <div class="rt-card"><div class="rt-card-k">Route share</div>
+                <div class="rt-card-v">${sr.share_pct}<small>%</small></div>
+                <span class="rt-bar rt-bar-lg"><i style="width:${Math.min(100, sr.share_pct)}%"></i></span>
+                <div class="rt-card-s">of auto traffic</div></div>
+            <div class="rt-card"><div class="rt-card-k">Latency · p50</div>
+                <div class="rt-card-v">${ms(sr.p50_ms)}</div>
+                <div class="rt-card-s">p95 · ${ms(sr.p95_ms)}</div></div>
+            <div class="rt-card"><div class="rt-card-k">Volume</div>
+                <div class="rt-card-v">${num(sr.requests)}</div>
+                <div class="rt-card-s">of ${num(w.total)} auto requests</div></div>`;
         routesBody.innerHTML = names.map((name) => {
             const r = w.routes[name];
-            return `<tr>
+            return `<tr${name === selRoute ? ' class="rt-sel"' : ''}>
                 <td>${esc(name)}</td>
                 <td><div class="rt-share"><span class="rt-bar"><i style="width:${r.share_pct}%"></i></span>${r.share_pct}%</div></td>
                 <td>${num(r.requests)}</td>
@@ -62,7 +82,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function feedbackCell(d) {
-        if (d.feedback) return `<span class="obs-badge blocked">→ ${esc(d.feedback.desired_route)} · ${esc(d.feedback.status)}</span>`;
+        if (d.feedback) return `<span class="rt-receipt">Reported → ${esc(d.feedback.desired_route)} · ${esc(d.feedback.status)}</span>`;
         const opts = CHOICES.filter(([, name]) => name !== d.route)
             .map(([key]) => `<option value="${key}">${key}</option>`).join('');
         return `<select class="rt-fb" data-cid="${esc(d.correlation_id)}" aria-label="Report misroute">
@@ -70,26 +90,31 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     async function loadDecisions() {
-        decisionsBody.innerHTML = empty(7, 'Loading…');
+        decisionsBody.innerHTML = empty(2, 'Loading…');
         try {
             const res = await fetch('/api/router/decisions?limit=50' + (candidatesBox.checked ? '&candidates=true' : ''));
             if (!res.ok) throw new Error('HTTP ' + res.status);
             const data = await res.json();
             if (!data.decisions.length) {
-                decisionsBody.innerHTML = empty(7, candidatesBox.checked ? 'No low-confidence decisions.' : 'No auto-routing decisions recorded yet.');
+                decisionsBody.innerHTML = empty(2, candidatesBox.checked ? 'No low-confidence decisions.' : 'No auto-routing decisions recorded yet.');
                 return;
             }
-            decisionsBody.innerHTML = data.decisions.map((d) => `<tr class="${d.low_confidence ? 'rt-low' : ''}">
-                <td>${esc(new Date(d.timestamp).toLocaleString())}</td>
-                <td>${esc(d.route)}${d.status && d.status !== 'success' ? ` <span class="obs-badge error">${esc(d.status)}</span>` : ''}</td>
-                <td>${d.stage === 'complexity' || d.stage === 'model' ? esc(d.confidence) : '–'}</td>
-                <td>${d.stage === 'complexity' || d.stage === 'model' ? `${esc(d.score)} / ${esc(d.threshold)}` : '–'}</td>
-                <td class="mono rt-reason">${esc(d.reason)}</td>
-                <td>${ms(d.latency_ms)}</td>
-                <td>${feedbackCell(d)}</td>
-            </tr>`).join('');
+            decisionsBody.innerHTML = data.decisions.map((d) => {
+                const scored = d.stage === 'complexity' || d.stage === 'model';
+                const meta = [esc(new Date(d.timestamp).toLocaleString()), ms(d.latency_ms),
+                    scored ? `conf ${esc(d.confidence)}` : null,
+                    scored ? `score ${esc(d.score)}/${esc(d.threshold)}` : null].filter(Boolean).join(' · ');
+                return `<tr class="${d.low_confidence ? 'rt-low' : ''}">
+                <td class="rt-dec">
+                    <div class="rt-dec-head"><span class="rt-route">${esc(d.route)}</span>${d.low_confidence ? '<span class="rt-lowlabel">Low confidence</span>' : ''}${d.status && d.status !== 'success' ? ` <span class="obs-badge error">${esc(d.status)}</span>` : ''}</div>
+                    <div class="rt-reason">${esc(d.reason)}</div>
+                    <div class="rt-meta">${meta}</div>
+                </td>
+                <td class="rt-act">${feedbackCell(d)}</td>
+            </tr>`;
+            }).join('');
         } catch (e) {
-            decisionsBody.innerHTML = empty(7, 'Error: ' + e.message, 'text-danger');
+            decisionsBody.innerHTML = empty(2, 'Error: ' + e.message, 'text-danger');
         }
     }
 
@@ -104,7 +129,7 @@ document.addEventListener("DOMContentLoaded", () => {
             });
             const d = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(typeof d.detail === 'string' ? d.detail : 'HTTP ' + res.status);
-            sel.outerHTML = `<span class="obs-badge blocked">→ ${esc(d.desired_route)} · new</span>`;
+            sel.outerHTML = `<span class="rt-receipt">Reported → ${esc(d.desired_route)} · new</span>`;
             loadStats();
         } catch (e) {
             sel.disabled = false;
@@ -112,6 +137,13 @@ document.addEventListener("DOMContentLoaded", () => {
             sel.title = 'Failed: ' + e.message;
             sel.classList.add('rt-fb-error');
         }
+    });
+
+    pickBox.addEventListener('click', (ev) => {
+        const b = ev.target.closest('.rt-pick');
+        if (!b) return;
+        selRoute = b.dataset.route;
+        renderStats();
     });
 
     pane.querySelectorAll('.rt-win').forEach((b) => b.addEventListener('click', () => {

@@ -161,6 +161,8 @@
                     <button id="rt-refresh" class="btn btn-sm">Refresh</button>
                 </div>
                 <div class="obs-stats-bar rt-chips" id="rt-chips"></div>
+                <div class="rt-routepick" id="rt-routepick" role="group" aria-label="Selected route"></div>
+                <div class="rt-cards" id="rt-cards"></div>
                 <div class="obs-table-wrapper">
                     <table class="obs-table rt-table" id="rt-routes-table">
                         <thead>
@@ -185,15 +187,10 @@
                     <label class="rt-check"><input type="checkbox" id="rt-candidates"> Low-confidence only (misroute candidates)</label>
                 </div>
                 <div class="obs-table-wrapper">
-                    <table class="obs-table rt-table" id="rt-decisions-table">
+                    <table class="obs-table rt-table rt-decisions" id="rt-decisions-table">
                         <thead>
                             <tr>
-                                <th>Time</th>
-                                <th>Route</th>
-                                <th>Conf</th>
-                                <th>Score / threshold</th>
-                                <th>Reason</th>
-                                <th>Latency</th>
+                                <th>Decision</th>
                                 <th>Wrong?</th>
                             </tr>
                         </thead>

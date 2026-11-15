@@ -140,9 +140,10 @@ function makeBadge({ route, backend, model, reason, cid, msgId }) {
   if (route)   el.innerHTML += `<span>route: ${esc(route)}</span>`;
   if (backend) el.innerHTML += `<span>backend: ${esc(backend)}</span>`;
   if (model)   el.innerHTML += `<span>model: ${esc(model)}</span>`;
-  if (reason)  el.innerHTML += `<span class="reason">↳ ${esc(reason)}</span>`;
-  // Auto-routed (has a reason) and traceable (has a correlation id): let the user flag a misroute.
+  // Auto-routed (has a reason) and traceable (has a correlation id): the feedback strip
+  // carries a short reason (full signal string on demand); otherwise show the raw reason.
   if (reason && cid && route) el.appendChild(makeRouteFeedback({ route, reason, cid, msgId }));
+  else if (reason) el.innerHTML += `<span class="reason">↳ ${esc(reason)}</span>`;
   return el;
 }
 
@@ -158,18 +159,53 @@ function promptFor(msgId) {
   return '';
 }
 
+// Short, human-readable label for the auto-router's technical reason string
+// (e.g. "score=10.0>=3 conf=1.00: depth_decisivex2+8" → "high complexity").
+function shortReason(reason) {
+  const r = String(reason || '');
+  if (r.startsWith('privacy_header')) return 'privacy (declared)';
+  if (/^privacy/.test(r)) return 'privacy';
+  const m = r.match(/^score=[\d.]+(>=|<)/);
+  if (m) return m[1] === '>=' ? 'high complexity' : 'low complexity';
+  const head = r.split(':')[0].replace(/_/g, ' ').trim();
+  return head.length > 32 ? head.slice(0, 31) + '…' : head;
+}
+
 function makeRouteFeedback({ route, reason, cid, msgId }) {
   const box = document.createElement('span');
   box.className = 'fb';
+  const info = document.createElement('span');
+  info.className = 'fb-info';
+  info.title = reason;
+  info.tabIndex = 0;
+  info.setAttribute('role', 'button');
+  info.setAttribute('aria-expanded', 'false');
+  info.innerHTML = `<span class="fb-route">${esc(route)}</span><span class="fb-sep">·</span><span class="fb-why">${esc(shortReason(reason))}</span><span class="fb-more" aria-hidden="true">▾</span>`;
+  const detail = document.createElement('span');
+  detail.className = 'fb-detail';
+  detail.textContent = reason;
+  detail.hidden = true;
+  const toggle = () => {
+    detail.hidden = !detail.hidden;
+    info.setAttribute('aria-expanded', String(!detail.hidden));
+  };
+  info.addEventListener('click', toggle);
+  info.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
   const open = document.createElement('button');
   open.type = 'button';
   open.className = 'fb-btn';
-  open.textContent = 'wrong route?';
-  box.appendChild(open);
+  open.textContent = 'Wrong route?';
+  box.append(info, open, detail);
 
   open.addEventListener('click', () => {
     box.replaceChildren();
-    box.append('should be: ');
+    const ask = document.createElement('span');
+    ask.className = 'fb-ask';
+    ask.textContent = 'Should be:';
+    box.appendChild(ask);
+    const opts = document.createElement('span');
+    opts.className = 'fb-opts';
+    box.appendChild(opts);
     let share = true;
     try { share = localStorage.getItem(FB_SHARE_KEY) !== '0'; } catch { /* default on */ }
     const cb = document.createElement('input');
@@ -191,14 +227,18 @@ function makeRouteFeedback({ route, reason, cid, msgId }) {
           });
           const d = await r.json().catch(() => ({}));
           if (!r.ok) throw new Error(typeof d.detail === 'string' ? d.detail : r.statusText);
-          box.textContent = `reported: should be ${d.desired_route}`;
+          box.replaceChildren();
+          const done = document.createElement('span');
+          done.className = 'fb-done';
+          done.textContent = `Reported → ${d.desired_route} · new`;
+          box.appendChild(done);
           toast(d.prompt_stored ? 'Thanks — reported with your prompt as a test candidate.'
                                 : 'Thanks — reported (prompt not stored).');
         } catch (e) {
           toast(`Could not send feedback: ${e.message}`);
         }
       });
-      box.appendChild(b);
+      opts.appendChild(b);
     }
     const lab = document.createElement('label');
     lab.className = 'fb-share';
