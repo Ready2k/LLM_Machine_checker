@@ -9,7 +9,7 @@ This guide explains how to connect Open WebUI to the Local AI Fabric gateway.
 3. Click the `+` button to add a new connection.
 4. Enter the following details:
    - **Base URL**: `http://<gateway-host-ip>:8080/v1` (or `http://127.0.0.1:8080/v1` if running on the same machine)
-   - **API Key**: `dummy-key` (The gateway validates this if `require_api_key_for_lan` is enabled in `security.yaml`)
+   - **API Key**: one of your `GATEWAY_API_KEYS` (required when the gateway has keys configured; sent as `Authorization: Bearer`)
 5. Click **Save** or **Verify Connection**.
 
 ## Available Models

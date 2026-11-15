@@ -14,7 +14,7 @@ The most important step is ensuring the gateway knows where the `fast-coder` and
 
 Copy the example configuration to the project root's config folder:
 ```bash
-cp config/backends.local.example.yaml ../../config/backends.local.yaml
+cp config/backends.local.yaml.example ../../config/backends.local.yaml
 ```
 
 Edit `../../config/backends.local.yaml`.
@@ -49,6 +49,7 @@ cd ~/LocalLLM
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp config/backends.local.yaml.example config/backends.local.yaml   # point at your LAN nodes
+cp .env.example .env && chmod 600 .env                            # set GATEWAY_API_KEYS + AGENT_SECRET (read by gateway.service)
 ```
 
 Give the Pi a **fixed IP / hostname** on your router (DHCP reservation) so the address your devices use never changes.

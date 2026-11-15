@@ -1,12 +1,15 @@
 # Local AI Fabric
 
-A lightweight, zero-dependency Python gateway and machine profiling system for hybrid local LLM routing. The Local AI Fabric allows you to run multiple inference nodes (e.g., MacBooks with LM Studio, Windows PCs with Ollama) and automatically route API requests to the best available local model, enforcing privacy policies to keep sensitive data off the cloud.
+A lightweight Python gateway and machine profiling system for hybrid local LLM routing. The Local AI Fabric allows you to run multiple inference nodes (e.g., MacBooks with LM Studio, Windows PCs with Ollama) and automatically route API requests to the best available local model, enforcing privacy policies to keep sensitive data off the cloud.
 
 ## Features
 
 - **Hardware Auto-Detection**: Profile hostnames, OS, CPU, RAM, and GPU to recommend machine roles.
 - **Smart Routing**: Route requests to `local-fast`, `local-quality`, or `private-docs` depending on need.
-- **Privacy Enforcement**: Block sensitive code or private documents from ever reaching the cloud via configurable privacy tiers (`personal`, `work`, `confidential`, `public`).
+- **Privacy Enforcement**: Block sensitive code or private documents from ever reaching the cloud via configurable privacy tiers (`public`, `personal`, `confidential`, `restricted`). The tier is declared by the client (`x-ai-privacy` header or `metadata.privacy`) — it's a routing policy, not authentication.
+- **Automatic Failover**: Each route has a primary and a fallback backend. If the primary is unreachable, times out (5s connect) or returns a 5xx, the request is retried on the fallback — including streams, before the first token. `x-ai-fallback-used` reports it. 4xx errors are not retried.
+- **API-Key Auth**: Set `GATEWAY_API_KEYS` to require a key from non-loopback clients (see [Security](#security)).
+- **Web Grounding**: Use the `web` model alias, the `x-ai-web-search: true` header, or the chat UI's 🌐 toggle to search a self-hosted SearXNG, fetch the top pages, and answer from cited sources (see [Web grounding](#web-grounding)).
 - **Telemetry & Monitoring**: Log metadata of all routing decisions to JSONL without logging sensitive prompts.
 - **Unified API**: Exposes an OpenAI-compatible `/v1/chat/completions` and `/v1/models` endpoint for drop-in integration with Open WebUI, Cursor, and VS Code.
 - **Web Chat UI**: A self-contained, mobile-friendly chat terminal at `/chat/` with conversation history and long-term memory stored client-side (IndexedDB) — no login, nothing user-specific stored on the gateway.
@@ -19,27 +22,46 @@ A lightweight, zero-dependency Python gateway and machine profiling system for h
    ```
 
 2. **Configure Backends**:
-   Copy the example backend configuration:
    ```bash
-   cp config/backends.example.yaml config/backends.local.yaml
+   cp config/backends.local.yaml.example config/backends.local.yaml
    ```
-   Edit `config/backends.local.yaml` to point to your live local nodes.
+   Edit `config/backends.local.yaml` to point to your live nodes. It is gitignored and **replaces** `backends.yaml` entirely when present. Supported runtimes: `ollama`, `lmstudio`, `openai_compatible` (e.g. mlx-lm / mlx.studio).
 
-3. **Run the Gateway**:
+3. **Set secrets**:
    ```bash
-   python -m gateway.server
+   cp .env.example .env     # then fill in GATEWAY_API_KEYS and AGENT_SECRET
    ```
-   The gateway will start on `http://127.0.0.1:8080`.
 
-4. **View Dashboard**:
+4. **Run the Gateway**:
+   ```bash
+   ./manage.sh start        # loads .env; or: python -m gateway.server
+   ```
+   Binds to `0.0.0.0:8080` (override with `GATEWAY_HOST` / `GATEWAY_PORT`). Serves HTTPS automatically if `certs/server.{crt,key}` exist (`scripts/make_cert.sh`).
+
+5. **View Dashboard**:
    Open `http://127.0.0.1:8080` in your browser to view the live health and architecture dashboard.
+
+## Security
+
+- **API keys:** with `GATEWAY_API_KEYS` set (comma-separated), requests to `/v1/*`, `/api/*` and the `/chat/*` helper endpoints from non-loopback clients need `Authorization: Bearer <key>` or `x-api-key`. Loopback is always trusted; the HTML pages, static files and `/api/health` stay open. Browsers are prompted for the key once and keep it in localStorage. If `require_api_key_for_lan` is true but no key is set, the gateway runs **open** and logs a warning.
+- **Agent secret:** set `AGENT_SECRET` (same value on the gateway and each node agent). Without it, the insecure built-in default is used.
+- **Cloud:** the `cloud-best` route is disabled unless explicitly configured.
+- **Prompts** are never logged; telemetry holds routing metadata only.
+
+## Web grounding
+
+Configure `config/tools.yaml` (or `SEARXNG_URL`) to point at a SearXNG node with JSON output enabled (`deployment/searxng/`). Search queries stay on your LAN; **page fetches go to the open web**, so grounding is only allowed for tiers listed in `security.yaml → web_search.allowed_privacy` (default `public`, `personal`). Fetches are SSRF-guarded (private/loopback/link-local addresses blocked, including via redirects), size-capped, and fetched text is passed to the model as untrusted data in the user turn. Response headers: `x-ai-grounding` (status) and `x-ai-sources` (base64 JSON).
+
+## Configuration
+
+`config/*.yaml` is cached and reloaded automatically when a file changes. `config/*.local.yaml` (gitignored) takes precedence. Model names in `models.yaml` may use `~` / `$VARS` (e.g. `~/.cache/huggingface/...`).
 
 ## Key Endpoints
 
 - `GET /` - Admin dashboard.
 - `GET /chat/` - Mobile-friendly web chat UI (history + memory stored client-side).
 - `GET /api/backends/health` - Live health check of all configured inference nodes.
-- `GET /v1/models` - Lists available abstract models (`local-fast`, `local-quality`, `cloud-best`).
+- `GET /v1/models` - Lists available model aliases (`auto`, `web`, `local-fast`, `local-quality`, `private-docs`, ...).
 - `POST /v1/chat/completions` - OpenAI-compatible inference endpoint.
 
 ## Documentation
@@ -48,6 +70,12 @@ A lightweight, zero-dependency Python gateway and machine profiling system for h
 - [Gateway Specification](docs/LOCAL_AI_FABRIC_SPEC.md)
 - [Web Dashboard Implementation Plan](docs/WEB_DASHBOARD_IMPLEMENTATION_PLAN.md)
 - [Chat History & Memory Spec](docs/CHAT_HISTORY_MEMORY_SPEC.md)
+
+## Tests
+
+```bash
+pytest tests/        # offline; test_live_backends.py skips when LAN nodes are unreachable
+```
 
 ## Diagnostics
 
