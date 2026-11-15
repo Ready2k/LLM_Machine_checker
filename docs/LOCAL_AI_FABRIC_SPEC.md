@@ -5,6 +5,8 @@ Owner: James Cregeen
 Repository: `Ready2k/LLM_Machine_checker`  
 Created: 2026-06-14
 
+> **Implementation status:** this is the original design spec; see `README.md` and `CLAUDE.md` for current behaviour. Implemented since: API-key middleware (`GATEWAY_API_KEYS`; loopback trusted; fails open with a warning if unset — there is no separate admin token yet), runtime failover to the route's fallback backend (connect error / timeout / 5xx), OpenAI parameter passthrough, SearXNG web grounding, secrets via `.env`. Telemetry is stored in SQLite rather than JSONL. Not implemented: OIDC, per-user quotas, per-route authorization.
+
 ## 1. Purpose
 
 This project will create a local and hybrid LLM execution fabric that lets James route coding, architecture, research, summarisation, and general LLM requests across local machines before falling back to paid hosted models.

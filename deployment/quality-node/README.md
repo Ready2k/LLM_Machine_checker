@@ -13,6 +13,8 @@ Optional during dev:
 
 Do not make it depend on Docker unless needed.
 
+> **Current setup:** the quality node now runs MLX servers behind the `openai_compatible` runtime — mlx.studio (Qwen3.6-27B) on `:8001` (`macbook-m4pro`) and mlx-lm (Gemma 3 12B QAT) on `:8002` (`macbook-m4pro-fast`). See `config/backends.yaml`. LM Studio (below) is still a supported runtime (`runtime: lmstudio`).
+
 ## LM Studio Guidance
 
 1. Install LM Studio.

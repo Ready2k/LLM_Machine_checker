@@ -1,5 +1,7 @@
 # Observability Dashboard — Update Spec
 
+> **Status:** original spec, partly superseded. Telemetry is now persisted to SQLite (`data/telemetry/observability.db`, see `gateway/telemetry/database.py`) and the Observability tab reads it via `/api/observability/*`. The JSONL file and `telemetry.path` described below are legacy.
+
 ## Overview
 
 Extend the existing Local AI Fabric dashboard (`http://127.0.0.1:8080`) with a live observability panel covering request history, latency metrics, route stats, and a warning/error stream — similar in spirit to a lightweight OTEL viewer, but built entirely within the existing FastAPI + vanilla JS stack.

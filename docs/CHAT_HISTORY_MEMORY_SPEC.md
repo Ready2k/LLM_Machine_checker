@@ -14,9 +14,9 @@ Memory *extraction* uses the LLM (a normal routed `/v1/chat/completions` call), 
 
 ## Why client-side (design rationale)
 
-The `/chat/` endpoint is a shared LAN terminal with no authentication (per [LOCAL_AI_FABRIC_SPEC.md](LOCAL_AI_FABRIC_SPEC.md) and the binding to `0.0.0.0`). Given that:
+The `/chat/` endpoint is a shared LAN terminal with no per-user authentication (per [LOCAL_AI_FABRIC_SPEC.md](LOCAL_AI_FABRIC_SPEC.md) and the binding to `0.0.0.0`); the gateway can require one shared API key (`GATEWAY_API_KEYS`), but that identifies the deployment, not a person. Given that:
 
-1. **No auth means the device is the only honest privacy boundary.** Server-side storage without identity would either pool everyone's chats together (privacy leak) or require building a login system (scope creep). Client-side storage gives each person a private store for free.
+1. **No per-user identity means the device is the only honest privacy boundary.** Server-side storage without identity would either pool everyone's chats together (privacy leak) or require building a login system (scope creep). Client-side storage gives each person a private store for free.
 2. **The Pi 3B stays light.** It continues to do only routing + static serving + stateless text extraction. No chat blobs, no per-user tables, no growth to manage.
 3. **Instant, offline-capable history.** No round-trips to list or load conversations.
 

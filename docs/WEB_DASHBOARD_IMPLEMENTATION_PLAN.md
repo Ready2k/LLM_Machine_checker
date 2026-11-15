@@ -6,6 +6,8 @@ Repository: `Ready2k/LLM_Machine_checker`
 Related spec: `docs/LOCAL_AI_FABRIC_SPEC.md`  
 Created: 2026-06-14
 
+> **Status:** historical plan. The gateway now binds `0.0.0.0` by default (override with `GATEWAY_HOST`) so the `/chat/` UI works from phones, and non-loopback access is protected by API keys (`GATEWAY_API_KEYS`) — the "localhost-only by default" guidance below no longer applies. See `README.md` → Security.
+
 ## 1. Scope decision
 
 This phase builds the first user-facing web dashboard for the Local AI Fabric system.

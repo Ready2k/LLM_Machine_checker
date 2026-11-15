@@ -10,7 +10,7 @@ A lightweight Python gateway and machine profiling system for hybrid local LLM r
 - **Automatic Failover**: Each route has a primary and a fallback backend. If the primary is unreachable, times out (5s connect) or returns a 5xx, the request is retried on the fallback — including streams, before the first token. `x-ai-fallback-used` reports it. 4xx errors are not retried.
 - **API-Key Auth**: Set `GATEWAY_API_KEYS` to require a key from non-loopback clients (see [Security](#security)).
 - **Web Grounding**: Use the `web` model alias, the `x-ai-web-search: true` header, or the chat UI's 🌐 toggle to search a self-hosted SearXNG, fetch the top pages, and answer from cited sources (see [Web grounding](#web-grounding)).
-- **Telemetry & Monitoring**: Log metadata of all routing decisions to JSONL without logging sensitive prompts.
+- **Telemetry & Monitoring**: Log metadata of all routing decisions (route, backend, latency, token usage) to SQLite (`data/telemetry/observability.db`) without logging sensitive prompts.
 - **Unified API**: Exposes an OpenAI-compatible `/v1/chat/completions` and `/v1/models` endpoint for drop-in integration with Open WebUI, Cursor, and VS Code.
 - **Web Chat UI**: A self-contained, mobile-friendly chat terminal at `/chat/` with conversation history and long-term memory stored client-side (IndexedDB) — no login, nothing user-specific stored on the gateway.
 
