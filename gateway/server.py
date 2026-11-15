@@ -747,21 +747,47 @@ async def get_v1_models():
             
     return {"object": "list", "data": enabled_models}
 
+def _pick_embeddings_backend(backends_config: dict) -> Optional[dict]:
+    """Backend to serve embeddings: the first enabled one flagged ``embeddings: true``,
+    else the legacy ``macbook-m4pro`` entry (kept for existing configs)."""
+    backends = backends_config.get("backends", {})
+    for b in backends.values():
+        if b.get("embeddings") and b.get("enabled", False):
+            return b
+    return backends.get("macbook-m4pro")
+
+
 @app.post("/v1/embeddings")
 async def embeddings(request: Request):
-    """Pass-through embeddings endpoint — forwards to LM Studio on the quality node."""
-    backends_config = load_backends_config()
-    backend = backends_config.get("backends", {}).get("macbook-m4pro", {})
-    openai_endpoint = backend.get("openai_endpoint", "").rstrip("/")
-    if not openai_endpoint:
+    """Pass-through embeddings endpoint. Local backends only, so no privacy gate is
+    needed. Set ``embeddings: true`` on a backend in backends.yaml to choose it."""
+    backend = _pick_embeddings_backend(load_backends_config()) or {}
+    base = (backend.get("openai_endpoint") or "").rstrip("/")
+    if not base and backend.get("endpoint"):
+        base = backend["endpoint"].rstrip("/") + "/v1"
+    if not base:
         raise HTTPException(status_code=503, detail="No embeddings backend configured")
 
-    import httpx
-    body = await request.json()
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.post(f"{openai_endpoint}/embeddings", json=body)
-        resp.raise_for_status()
-        return JSONResponse(content=resp.json())
+    try:
+        body = await request.json()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Request body must be JSON")
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=5.0)) as client:
+            resp = await client.post(f"{base}/embeddings", json=body)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail={
+            "message": f"Embeddings backend unreachable: {type(e).__name__}: {e}",
+            "type": "backend_error", "code": "bad_gateway"})
+    if resp.status_code >= 500:
+        raise HTTPException(status_code=502, detail={
+            "message": f"Embeddings backend error ({resp.status_code})",
+            "type": "backend_error", "code": "bad_gateway"})
+    try:
+        content = resp.json()
+    except ValueError:
+        raise HTTPException(status_code=502, detail="Embeddings backend returned non-JSON")
+    return JSONResponse(content=content, status_code=resp.status_code)
 
 
 @app.post("/v1/chat/completions")
