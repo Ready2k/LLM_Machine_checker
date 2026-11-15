@@ -28,3 +28,7 @@ backends:
     inference_enabled: false
     health_path: null
     notes: Utility/admin/RAG/dashboard node only. Must not be selected for inference.
+
+# Node-agent shared secret: don't put it in committed config. Export AGENT_SECRET
+# in the environment of the gateway AND each node agent (same value), or set a
+# per-backend `agent_secret:` here (this file is gitignored once copied).

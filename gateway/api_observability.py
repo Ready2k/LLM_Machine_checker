@@ -1,9 +1,30 @@
+import os
+import logging
 from fastapi import APIRouter, HTTPException, Response
 from typing import List, Dict, Any, Optional
 import json
 
 from gateway.telemetry.database import get_db
 from gateway.telemetry.collectors_http import HttpAgentCollector
+
+def resolve_agent_secret(b_config: dict):
+    """Node-agent shared secret: the AGENT_SECRET env var (same variable the
+    node agent reads) wins, then a per-backend ``agent_secret`` in a local config.
+    Returns None if the backend has no agent. Falls back to the agent's built-in
+    default (with a warning) so existing deployments keep working."""
+    if not b_config.get("agent_url"):
+        return None
+    secret = os.environ.get("AGENT_SECRET") or b_config.get("agent_secret")
+    if secret:
+        return secret
+    logging.getLogger("gateway.observability").warning(
+        "AGENT_SECRET is not set; using the insecure built-in default. "
+        "Set AGENT_SECRET (on the gateway and on every node agent)."
+    )
+    return DEFAULT_AGENT_SECRET
+
+
+DEFAULT_AGENT_SECRET = "default-node-secret-change-me"  # matches node_agent/agent.py
 
 router = APIRouter(prefix="/api/observability", tags=["observability"])
 
@@ -120,7 +141,7 @@ async def get_trace_logs(correlation_id: str):
     b_config = backends_config.get("backends", {}).get(backend_id, {})
     
     agent_url = b_config.get("agent_url")
-    agent_secret = b_config.get("agent_secret")
+    agent_secret = resolve_agent_secret(b_config)
     runtime = b_config.get("runtime", "ollama")
     
     if not agent_url or not agent_secret:
