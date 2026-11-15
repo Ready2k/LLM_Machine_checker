@@ -15,20 +15,33 @@ CONFIG_DIR = PROJECT_ROOT / "config"
 
 logger = logging.getLogger(__name__)
 
+_TELEMETRY_CACHE: dict = {}  # path -> ((mtime_ns, size), telemetry-config)
+
+
 def _load_telemetry_config() -> dict:
+    """The ``telemetry`` block of security.{local.,}{yaml,json}. Called several times
+    per request, so it's cached until the file's mtime/size changes."""
     for ext in [".local.yaml", ".yaml", ".local.json", ".json"]:
         path = CONFIG_DIR / f"security{ext}"
-        if path.exists():
-            try:
-                if ext.endswith(".yaml"):
-                    import yaml
-                    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-                    return data.get("telemetry", {})
-                else:
-                    data = json.loads(path.read_text(encoding="utf-8")) or {}
-                    return data.get("telemetry", {})
-            except Exception:
-                pass
+        if not path.exists():
+            continue
+        try:
+            st = path.stat()
+            sig = (st.st_mtime_ns, st.st_size)
+            hit = _TELEMETRY_CACHE.get(str(path))
+            if hit and hit[0] == sig:
+                return dict(hit[1])
+            text = path.read_text(encoding="utf-8")
+            if ext.endswith(".yaml"):
+                import yaml
+                data = yaml.safe_load(text) or {}
+            else:
+                data = json.loads(text) or {}
+            cfg = data.get("telemetry", {}) or {}
+            _TELEMETRY_CACHE[str(path)] = (sig, cfg)
+            return dict(cfg)
+        except Exception:
+            pass
     return {}
 
 def log_llm_request(
