@@ -34,7 +34,7 @@ from gateway.policy.privacy import extract_privacy_level, is_privacy_allowed, ca
 from gateway.policy.routing import resolve_model_to_route, select_backend
 from gateway.policy.autoroute import select_auto_route
 from gateway.policy.auth import api_key_middleware, auth_status
-from gateway.tools.websearch import WebSearchClient, build_grounding_block
+from gateway.tools.websearch import WebSearchClient, inject_grounding
 from gateway.telemetry.events import log_routing_decision, log_llm_event, _load_telemetry_config
 from gateway.telemetry.database import init_db, close_db
 from gateway.api_observability import router as observability_router
@@ -518,7 +518,7 @@ async def _apply_web_grounding(request: ChatCompletionRequest, privacy_level: st
         return request, [], "no_results"
 
     grounded = request.model_copy(update={
-        "messages": [{"role": "system", "content": build_grounding_block(sources)}, *request.messages]
+        "messages": inject_grounding(request.messages, sources)
     })
     log_llm_event(correlation_id, "web.search", f"grounded with {len(sources)} sources",
                   {"sources": len(sources)})
