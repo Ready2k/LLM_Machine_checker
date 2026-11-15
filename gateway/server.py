@@ -265,9 +265,10 @@ def get_provider(backend_id: str, backends_config: dict) -> Optional[Provider]:
     endpoint = b_config.get("endpoint")
     if not runtime or not endpoint:
         return None
+    runtime = str(runtime).replace("_", "-").lower()  # accept openai_compatible / openai-compatible
     if runtime == "ollama":
         return OllamaProvider(backend_id, endpoint, role=b_config.get("role", "unknown"))
-    elif runtime == "lmstudio":
+    elif runtime in ("lmstudio", "lm-studio"):
         return LMStudioProvider(backend_id, endpoint, role=b_config.get("role", "unknown"))
     elif runtime == "openai-compatible":
         return OpenAICompatibleProvider(backend_id, endpoint, role=b_config.get("role", "unknown"))
