@@ -9,6 +9,7 @@ Port:         GATEWAY_PORT env var (default 8080).
 """
 
 import base64
+import copy
 import io
 import json
 import os
@@ -200,30 +201,42 @@ def derive_routes_from_inventory(machines: list[dict]) -> dict:
     return routes
 
 
+_CONFIG_CACHE: dict = {}  # path -> ((mtime_ns, size), parsed)
+
+
+def _read_config_file(path: Path):
+    """Parse a YAML/JSON config file, cached until its mtime/size changes so the
+    request path doesn't re-read and re-parse on every call. Returns a deep copy
+    so callers can't corrupt the cache. Raises on read/parse errors (uncached)."""
+    st = path.stat()
+    sig = (st.st_mtime_ns, st.st_size)
+    hit = _CONFIG_CACHE.get(str(path))
+    if hit and hit[0] == sig:
+        return copy.deepcopy(hit[1])
+    text = path.read_text(encoding="utf-8")
+    if path.suffix in (".yaml", ".yml"):
+        import yaml
+        parsed = yaml.safe_load(text)
+    else:
+        parsed = json.loads(text)
+    _CONFIG_CACHE[str(path)] = (sig, parsed)
+    return copy.deepcopy(parsed)
+
+
 def load_routes_config() -> dict:
     """Load route configuration from config files or derive from inventory.
 
     Checks config/routes.yaml then config/routes.json.
     Falls back to deriving routes from inventory/machines.json.
     """
-    # Try YAML config first
-    yaml_path = CONFIG_DIR / "routes.yaml"
-    if yaml_path.exists():
-        try:
-            import yaml
-            data = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
-            return {"routes": data.get("routes", {}), "source": "config"}
-        except Exception:
-            pass
-
-    # Try JSON config
-    json_path = CONFIG_DIR / "routes.json"
-    if json_path.exists():
-        try:
-            data = json.loads(json_path.read_text(encoding="utf-8"))
-            return {"routes": data.get("routes", {}), "source": "config"}
-        except Exception:
-            pass
+    for name in ("routes.yaml", "routes.json"):
+        path = CONFIG_DIR / name
+        if path.exists():
+            try:
+                data = _read_config_file(path) or {}
+                return {"routes": data.get("routes", {}), "source": "config"}
+            except Exception:
+                pass
 
     # Derive from inventory
     inventory = load_inventory()
@@ -237,11 +250,7 @@ def _load_yaml_or_json(name: str, default_val: dict) -> dict:
         path = CONFIG_DIR / f"{name}{ext}"
         if path.exists():
             try:
-                if ext.endswith(".yaml"):
-                    import yaml
-                    return yaml.safe_load(path.read_text(encoding="utf-8")) or default_val
-                else:
-                    return json.loads(path.read_text(encoding="utf-8")) or default_val
+                return _read_config_file(path) or default_val
             except Exception:
                 pass
     return default_val
@@ -257,6 +266,16 @@ def load_backends_config() -> dict:
 
 def load_tools_config() -> dict:
     return _load_yaml_or_json("tools", {"tools": {}})
+
+def resolve_target_model(alias: str, models_config: dict) -> str:
+    """Map a model alias to the backend's model id. ``~`` and ``$VARS`` are
+    expanded so configs can say ``~/.cache/...`` instead of a user-specific path."""
+    entry = models_config.get("models", {}).get(alias)
+    if not entry:
+        return alias
+    model = entry.get("model") or alias
+    return os.path.expanduser(os.path.expandvars(model)) if isinstance(model, str) else alias
+
 
 def get_provider(backend_id: str, backends_config: dict) -> Optional[Provider]:
     b_config = backends_config.get("backends", {}).get(backend_id)
@@ -1079,9 +1098,7 @@ async def route_test(request: RouteTestRequest):
     if not provider:
         raise HTTPException(status_code=500, detail={"message": f"Provider adapter not found for backend {backend_id}", "type": "config_error", "code": "internal_error"})
 
-    target_model_name = request.route
-    if request.route in models_config.get("models", {}):
-        target_model_name = models_config["models"][request.route].get("model", request.route)
+    target_model_name = resolve_target_model(request.route, models_config)
         
     chat_req = ChatCompletionRequest(
         model=target_model_name,
