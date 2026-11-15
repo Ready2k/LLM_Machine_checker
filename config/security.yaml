@@ -2,10 +2,9 @@ security:
   default_privacy: personal
   allow_cloud_by_default: false
   allowed_cloud_roles: ["system_admin", "architect"]
+  # Enforced by gateway/policy/auth.py when GATEWAY_API_KEYS is set (see README).
   require_api_key_for_lan: true
   prompt_logging_enabled: false
-  allowed_bind_hosts:
-    - 127.0.0.1
 
   # Web grounding gate. SearXNG keeps the query on the LAN, but page fetches
   # leave the network — so only allow it for lower-sensitivity tiers. Requests

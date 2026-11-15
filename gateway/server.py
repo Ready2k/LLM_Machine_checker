@@ -33,6 +33,7 @@ from gateway.providers.openai_compatible import OpenAICompatibleProvider
 from gateway.policy.privacy import extract_privacy_level, is_privacy_allowed, can_fallback_to_cloud, is_web_search_allowed
 from gateway.policy.routing import resolve_model_to_route, select_backend
 from gateway.policy.autoroute import select_auto_route
+from gateway.policy.auth import api_key_middleware, auth_status
 from gateway.tools.websearch import WebSearchClient, build_grounding_block
 from gateway.telemetry.events import log_routing_decision, log_llm_event, _load_telemetry_config
 from gateway.telemetry.database import init_db, close_db
@@ -289,6 +290,7 @@ _cached_profile: Optional[dict] = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db(PROJECT_ROOT)
+    auth_status(load_security_config().get("security", {}), log=True)
     yield
     await close_db()
 
@@ -301,6 +303,7 @@ app = FastAPI(
 )
 
 app.include_router(observability_router)
+app.middleware("http")(api_key_middleware)
 
 # Mount static files (CSS, JS, images)
 if STATIC_DIR.exists():
