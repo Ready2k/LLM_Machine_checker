@@ -10,7 +10,17 @@ import { initMemory, buildInjection, addSuggestions, refreshMemoryUI } from './m
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 function esc(s) {
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // Escape quotes too: esc() output is also used inside HTML attributes.
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// Only http(s) links may be rendered as hrefs (blocks javascript:/data: URLs).
+function safeHref(u) {
+  try {
+    const p = new URL(String(u));
+    return (p.protocol === 'http:' || p.protocol === 'https:') ? p.href : '#';
+  } catch { return '#'; }
 }
 
 // Minimal markdown -> HTML. Always escapes first, so any stored content
@@ -150,7 +160,7 @@ function renderSources(wrap, sources) {
   const box = document.createElement('div');
   box.className = 'sources';
   box.innerHTML = '<div class="sources-head">Sources</div>' + sources.map(s =>
-    `<a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">` +
+    `<a href="${esc(safeHref(s.url))}" target="_blank" rel="noopener noreferrer">` +
     `<span class="snum">[${esc(String(s.n))}]</span>` +
     `<span class="stitle">${esc(s.title || s.url)}</span></a>`
   ).join('');
