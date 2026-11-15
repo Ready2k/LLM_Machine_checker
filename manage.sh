@@ -6,6 +6,9 @@
 PID_FILE=".gateway.pid"
 AGENT_PID_FILE=".agent.pid"
 
+# Load local secrets (GATEWAY_API_KEYS, AGENT_SECRET, SEARXNG_URL, ...) if present.
+if [ -f ".env" ]; then set -a; . ./.env; set +a; fi
+
 start() {
     if [ -f "$PID_FILE" ]; then
         if kill -0 $(cat "$PID_FILE") 2>/dev/null; then

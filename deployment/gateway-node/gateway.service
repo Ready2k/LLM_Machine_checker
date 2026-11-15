@@ -21,6 +21,8 @@ User=pi
 WorkingDirectory=/home/pi/LocalLLM
 Environment=GATEWAY_HOST=0.0.0.0
 Environment=GATEWAY_PORT=8080
+# Secrets (GATEWAY_API_KEYS, AGENT_SECRET, SEARXNG_URL): put them in .env, chmod 600.
+EnvironmentFile=-/home/pi/LocalLLM/.env
 
 # HTTPS (recommended — required for phone voice). Generate certs first with
 # scripts/make_cert.sh, then uncomment these two lines:
