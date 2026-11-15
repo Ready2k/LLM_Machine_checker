@@ -56,3 +56,28 @@ def test_old_macbook_health_is_not_eligible_for_inference():
     backends = {b["id"]: b for b in data["backends"]}
     assert backends["old-macbook"]["inference_enabled"] is False
     assert backends["old-macbook"]["eligible"] is False
+
+
+@respx.mock
+def test_backends_are_probed_concurrently(monkeypatch):
+    """N slow backends must cost ~one timeout, not N, and keep config order."""
+    import asyncio, time
+    import gateway.server as server
+    from gateway.providers.base import BackendHealth
+
+    cfg = {"backends": {f"b{i}": {"role": "local_fast", "runtime": "ollama",
+                                   "endpoint": f"http://h{i}:1", "enabled": True} for i in range(5)}}
+    monkeypatch.setattr(server, "load_backends_config", lambda: cfg)
+
+    class Slow:
+        def __init__(self, bid): self.bid = bid
+        async def health(self):
+            await asyncio.sleep(0.3)
+            return BackendHealth(id=self.bid, role="r", runtime="ollama", endpoint="e", status="up", models=[])
+
+    monkeypatch.setattr(server, "get_provider", lambda bid, _cfg: Slow(bid))
+    t = time.time()
+    data = client.get("/api/backends/health").json()
+    assert time.time() - t < 1.0                    # sequential would be >= 1.5s
+    assert [b["id"] for b in data["backends"]] == [f"b{i}" for i in range(5)]
+    assert data["status"] == "ok"

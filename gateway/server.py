@@ -8,6 +8,7 @@ Bind address: GATEWAY_HOST env var (default 0.0.0.0 — all interfaces).
 Port:         GATEWAY_PORT env var (default 8080).
 """
 
+import asyncio
 import base64
 import copy
 import json
@@ -664,22 +665,21 @@ async def get_stats():
 async def get_backends_health():
     backends_config = load_backends_config()
     backends_list = backends_config.get("backends", {})
-    healths = []
-    
-    for bid, bconf in backends_list.items():
+
+    async def check(bid: str, bconf: dict) -> dict:
         enabled = bconf.get("enabled", False)
         inference_enabled = bconf.get("inference_enabled", False)
-        
+
         if bid == "old-macbook":
             inference_enabled = False
-            
+
         provider = get_provider(bid, backends_config)
         reachable = False
         status_str = "down"
         latency_ms = None
         error_str = None
         models = []
-        
+
         if provider and enabled:
             try:
                 h = await provider.health()
@@ -690,13 +690,13 @@ async def get_backends_health():
                 models = h.models
             except Exception as e:
                 error_str = str(e)
-                
+
         eligible = enabled and inference_enabled and reachable
-        
+
         if bid == "old-macbook":
             eligible = False
-            
-        healths.append({
+
+        return {
             "id": bid,
             "runtime": bconf.get("runtime", "unknown"),
             "role": bconf.get("role", "unknown"),
@@ -710,9 +710,13 @@ async def get_backends_health():
             "latency_ms": latency_ms,
             "models": models,
             "error": error_str,
-            "status": status_str
-        })
-        
+            "status": status_str,
+        }
+
+    # Probe all backends concurrently (a down node costs one timeout, not N).
+    # gather() preserves config order.
+    healths = list(await asyncio.gather(*(check(bid, bconf) for bid, bconf in backends_list.items())))
+
     status = "ok"
     if any(not h["reachable"] for h in healths if h["enabled"]):
         status = "degraded"
