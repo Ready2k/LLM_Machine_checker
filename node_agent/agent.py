@@ -1,3 +1,5 @@
+import hmac
+import logging
 import os
 import re
 import subprocess
@@ -8,7 +10,20 @@ from pydantic import BaseModel
 # Configuration via environment variables with sensible defaults
 HOST = os.getenv("AGENT_HOST", "0.0.0.0")
 PORT = int(os.getenv("AGENT_PORT", "8081"))
-SHARED_SECRET = os.getenv("AGENT_SECRET", "default-node-secret-change-me")
+DEFAULT_SECRET = "default-node-secret-change-me"
+SHARED_SECRET = os.getenv("AGENT_SECRET", DEFAULT_SECRET)
+logger = logging.getLogger("node_agent")
+
+
+def check_secret_configured() -> None:
+    """Warn (or refuse, with AGENT_STRICT=1) when running on the public default
+    secret — the agent exposes server logs and listens on all interfaces."""
+    if SHARED_SECRET != DEFAULT_SECRET:
+        return
+    msg = "AGENT_SECRET is not set: using the insecure built-in default secret."
+    if os.getenv("AGENT_STRICT", "").lower() in ("1", "true", "yes"):
+        raise SystemExit(msg + " Refusing to start (AGENT_STRICT=1).")
+    logger.warning(msg)
 
 app = FastAPI(title="Local AI Fabric - Node Agent")
 
@@ -16,8 +31,8 @@ def verify_token(authorization: Optional[str] = Header(None)):
     """Simple Bearer token verification."""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing or invalid token")
-    token = authorization.split(" ")[1]
-    if token != SHARED_SECRET:
+    token = authorization[len("Bearer "):].strip()
+    if not hmac.compare_digest(token.encode(), SHARED_SECRET.encode()):
         raise HTTPException(status_code=403, detail="Unauthorized")
 
 @app.get("/health")
@@ -61,7 +76,7 @@ def _get_lmstudio_log_path() -> Optional[str]:
 @app.get("/logs")
 async def get_logs(
     lines: int = Query(100, ge=1, le=5000),
-    source: str = Query("ollama", regex="^(ollama|lmstudio)$"),
+    source: str = Query("ollama", pattern="^(ollama|lmstudio)$"),
     grep: Optional[str] = None,
     authorization: Optional[str] = Header(None)
 ):
@@ -134,6 +149,7 @@ async def gpu_diagnostics(authorization: Optional[str] = Header(None)):
 
 if __name__ == "__main__":
     import uvicorn
+    check_secret_configured()
     print(f"Starting Node Agent on {HOST}:{PORT}")
     print(f"Ensure the gateway uses the correct AGENT_SECRET.")
     uvicorn.run(app, host=HOST, port=PORT, access_log=False)
