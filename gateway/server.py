@@ -34,7 +34,7 @@ from gateway.providers.openai_compatible import OpenAICompatibleProvider, close_
 from gateway.providers.sse import UsageTap
 from gateway.policy.privacy import extract_privacy_level, is_privacy_allowed, can_fallback_to_cloud, is_web_search_allowed, apply_privacy_floor
 from gateway.policy.routing import resolve_model_to_route, select_backend, select_backends
-from gateway.policy.autoroute import select_auto_route
+from gateway.policy.autoroute import select_auto_route, classify as classify_auto_route, refine_with_model, wants_tiebreak, tiebreak_settings  # noqa: F401  (select_auto_route kept importable from here)
 from gateway.policy.auth import api_key_middleware, auth_status
 from gateway.policy.limits import limits_middleware, limits_config, clamp_max_tokens
 from gateway.tools.websearch import WebSearchClient, inject_grounding
@@ -146,6 +146,10 @@ def load_backends_config() -> dict:
 
 def load_tools_config() -> dict:
     return _load_yaml_or_json("tools", {"tools": {}})
+
+def load_autoroute_config() -> dict:
+    """Optional tuning for model:"auto" (config/autoroute.yaml); {} = built-in defaults."""
+    return _load_yaml_or_json("autoroute", {})
 
 def resolve_target_model(alias: str, models_config: dict) -> str:
     """Map a model alias to the backend's model id. ``~`` and ``$VARS`` are
@@ -436,6 +440,32 @@ async def embeddings(request: Request):
     return JSONResponse(content=content, status_code=resp.status_code)
 
 
+async def _autoroute_tiebreak(decision, messages, privacy_level, autoroute_config,
+                              models_config, routes_config, backends_config):
+    """Ask the configured small local model whether a borderline request is
+    SIMPLE or COMPLEX. Only runs on routes this privacy tier may use."""
+    tb = tiebreak_settings(autoroute_config)
+    alias = tb.get("model", "local-fast")
+
+    async def ask(judge_messages: list) -> str:
+        _, route_config = resolve_model_to_route(alias, models_config, routes_config)
+        if not is_privacy_allowed(privacy_level, route_config):
+            raise PermissionError("tiebreak route not allowed for this privacy tier")
+        backend_id = select_backends(route_config, backends_config)[0]
+        provider = get_provider(backend_id, backends_config)
+        if not provider:
+            raise RuntimeError("no provider for tiebreak")
+        judge_request = ChatCompletionRequest(model=alias, messages=judge_messages,
+                                              max_tokens=4, temperature=0, stream=False)
+        response = await asyncio.wait_for(
+            provider.chat_completions(judge_request, resolve_target_model(alias, models_config)),
+            timeout=float(tb.get("timeout_s", 1.5)),
+        )
+        return (response.choices[0].get("message") or {}).get("content") or ""
+
+    return await refine_with_model(decision, messages, ask, autoroute_config)
+
+
 @app.post("/v1/chat/completions")
 async def chat_completions(request: ChatCompletionRequest, raw_request: Request,
                            x_ai_privacy: Optional[str] = Header(None),
@@ -477,8 +507,24 @@ async def chat_completions(request: ChatCompletionRequest, raw_request: Request,
     # 2. Auto-routing: inspect prompt and pick best route automatically
     auto_reason = None
     if request.model == "auto":
-        auto_route, auto_reason = select_auto_route(request.messages, privacy_level)
-        request = request.model_copy(update={"model": auto_route})
+        extra = request.model_extra or {}
+        autoroute_config = load_autoroute_config()
+        decision = classify_auto_route(
+            request.messages, privacy_level,
+            tools=extra.get("tools"), response_format=extra.get("response_format"),
+            config=autoroute_config,
+        )
+        # Optional (off by default): a close call gets a one-word verdict from the
+        # fast local model. Best-effort — any failure keeps the rule-based answer.
+        if wants_tiebreak(decision, autoroute_config):
+            decision = await _autoroute_tiebreak(
+                decision, request.messages, privacy_level, autoroute_config,
+                models_config, routes_config, backends_config,
+            )
+        auto_reason = decision.reason
+        # The trace holds signal names and counts only — no prompt content.
+        log_llm_event(correlation_id, "router.auto", f"auto -> {decision.route}: {decision.reason}", decision.to_dict())
+        request = request.model_copy(update={"model": decision.route})
 
     # 2b. Web grounding: search + fetch, then prepend a grounding system message.
     #     Done after route selection so the injected sources don't skew the

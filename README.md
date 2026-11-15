@@ -6,6 +6,7 @@ A lightweight Python gateway and machine profiling system for hybrid local LLM r
 
 - **Hardware Auto-Detection**: Profile hostnames, OS, CPU, RAM, and GPU to recommend machine roles.
 - **Smart Routing**: Route requests to `local-fast`, `local-quality`, or `private-docs` depending on need.
+- **Auto Routing**: Send `model: "auto"` and the gateway picks the route from the prompt itself — offline, deterministic and sub-millisecond (see [Auto routing](#auto-routing)).
 - **Privacy Enforcement**: Block sensitive code or private documents from ever reaching the cloud via configurable privacy tiers (`public`, `personal`, `confidential`, `restricted`). The tier is declared by the client (`x-ai-privacy` header or `metadata.privacy`) — it's a routing policy, not authentication.
 - **Automatic Failover**: Each route has a primary and a fallback backend. If the primary is unreachable, times out (5s connect) or returns a 5xx, the request is retried on the fallback — including streams, before the first token. `x-ai-fallback-used` reports it. 4xx errors are not retried.
 - **API-Key Auth**: Set `GATEWAY_API_KEYS` to require a key from non-loopback clients (see [Security](#security)).
@@ -53,6 +54,18 @@ A lightweight Python gateway and machine profiling system for hybrid local LLM r
 ## Web grounding
 
 Configure `config/tools.yaml` (or `SEARXNG_URL`) to point at a SearXNG node with JSON output enabled (`deployment/searxng/`). Search queries stay on your LAN; **page fetches go to the open web**, so grounding is only allowed for tiers listed in `security.yaml → web_search.allowed_privacy` (default `public`, `personal`). Fetches are SSRF-guarded: each request and redirect hop resolves the host once, rejects private/loopback/link-local addresses and connects to that exact IP (so DNS rebinding can't swap it), while TLS still verifies the real hostname. Responses are size-capped and fetches ignore `HTTP(S)_PROXY` (a proxy would bypass the check), so an egress proxy isn't supported for page fetches. Fetched text is passed to the model as untrusted data in the user turn. Response headers: `x-ai-grounding` (status) and `x-ai-sources` (base64 JSON).
+
+## Auto routing
+
+`model: "auto"` (also used by `web`) classifies each request in pure Python — no model call — and reports why in the `x-ai-auto-reason` response header:
+
+1. **Privacy tier**: `x-ai-privacy: confidential|restricted` (or a key's privacy floor) goes straight to `private-docs`.
+2. **Content privacy**: the whole conversation is scanned. Secrets and PII recognised by shape (private keys, API tokens, card numbers, SSN/NI numbers, IBANs, literal `password = "..."`) and unambiguous terms ("confidential", "NDA", "mot de passe", …) always route to `private-docs`. Ambiguous words (`private`, `internal`, `secret`, `password`, `salary`, …) do so in prose, but not as code tokens (`private void f()`, `self.password`) or in benign phrases ("internal server error", "password manager"). Set `privacy_mode: strict` to make any of those words trigger anywhere.
+3. **Complexity**: a weighted score over the last user message — depth vocabulary (several languages), multiple questions, enumerated parts, length, amount of code, `tools` / `json_schema`, conversation size, and short follow-ups to a complex turn — picks `local-quality` at or above `quality_threshold`, otherwise `local-fast`.
+
+A reason looks like `score=4.5>=3 conf=0.88: depth_strong+2 code_task+1.5 code_block+1`. It names signals and weights only, never prompt text, and is also logged as a `router.auto` trace event.
+
+Tune it in `config/autoroute.yaml` (optional; applies without a restart): threshold, per-signal weights, extra terms per vocabulary tier, route names. `llm_tiebreak` (off by default) asks the `local-fast` model for a one-word SIMPLE/COMPLEX verdict on close calls; it never runs for private decisions and any failure keeps the rule-based answer. When a prompt is misrouted, add it to the corpus in `tests/test_autoroute.py` and adjust until the file passes.
 
 ## Configuration
 

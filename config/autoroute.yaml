@@ -1,0 +1,51 @@
+# Tuning for model: "auto" (gateway/policy/autoroute.py). Everything here is
+# optional: delete a key (or the whole file) to use the built-in default, shown
+# below. Edits apply without a restart. autoroute.local.yaml (if present)
+# replaces this file.
+#
+# To debug a routing decision, read the x-ai-auto-reason response header: it
+# lists every signal that fired with its weight, e.g.
+#   score=4.5>=3 conf=0.88: depth_strong+2 code_task+1.5 code_block+1
+autoroute:
+  routes:
+    fast: local-fast
+    quality: local-quality
+    private: private-docs
+
+  # Complexity score at or above this goes to the quality route.
+  # Raise it to keep more traffic on the fast node.
+  quality_threshold: 3.0
+
+  # contextual: ambiguous words (private, internal, secret, password, ...) count
+  #             only in prose, not as code tokens or in known-benign phrases.
+  # strict:     any of those words anywhere routes to the private route.
+  privacy_mode: contextual
+
+  # Per-signal weight overrides; names match the reason string. Full list and
+  # defaults: DEFAULTS["weights"] in autoroute.py.
+  weights: {}
+  #   depth_mild: 1.0
+  #   tools: 1.5
+  #   short_prompt: -0.5
+
+  # Extra phrases per vocabulary tier (plain text, case-insensitive; a trailing
+  # * matches any word ending).
+  extra_terms:
+    privacy_strong: []      # always private, e.g. ["project aurora"]
+    privacy_contextual: []  # private in prose only
+    privacy_benign: []      # phrases that neutralise a contextual word
+    depth_decisive: []      # one hit is enough for quality
+    depth_strong: []
+    depth_mild: []
+    fast: []
+    fast_opener: []
+    brevity: []
+
+  # Optional second opinion for close calls: ask a small local model for a
+  # one-word SIMPLE/COMPLEX verdict. Off by default, so routing stays offline,
+  # deterministic and sub-millisecond. Never used for private-route decisions.
+  llm_tiebreak:
+    enabled: false
+    model: local-fast       # alias to ask
+    max_margin: 1.0         # only when |score - quality_threshold| < this
+    timeout_s: 1.5
