@@ -66,3 +66,25 @@ def select_backend(route_config: dict, backends_config: dict) -> str:
         status_code=503,
         detail={"message": "No eligible backends available for route", "type": "no_backends_available", "code": "service_unavailable"}
     )
+
+
+def select_backends(route_config: dict, backends_config: dict) -> list:
+    """Ordered list of eligible backends for a route: primary first, then fallback.
+
+    Used by the request path to retry on the fallback when the primary fails at
+    runtime (connection error / timeout / 5xx). Raises 503 if none are eligible.
+    """
+    backends = backends_config.get("backends", {})
+    ordered = []
+    for bid in (route_config.get("primary"), route_config.get("fallback")):
+        if not bid or bid in ordered:
+            continue
+        b = backends.get(bid, {})
+        if b.get("enabled", False) and b.get("inference_enabled", True) is not False:
+            ordered.append(bid)
+    if not ordered:
+        raise HTTPException(
+            status_code=503,
+            detail={"message": "No eligible backends available for route", "type": "no_backends_available", "code": "service_unavailable"}
+        )
+    return ordered

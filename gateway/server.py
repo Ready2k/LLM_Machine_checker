@@ -26,13 +26,14 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 import uuid
 import time
+import httpx
 
 from gateway.providers.base import BackendHealth, ModelInfo, ChatCompletionRequest, ChatCompletionResponse, Provider
 from gateway.providers.ollama import OllamaProvider
 from gateway.providers.lmstudio import LMStudioProvider
 from gateway.providers.openai_compatible import OpenAICompatibleProvider
 from gateway.policy.privacy import extract_privacy_level, is_privacy_allowed, can_fallback_to_cloud, is_web_search_allowed
-from gateway.policy.routing import resolve_model_to_route, select_backend
+from gateway.policy.routing import resolve_model_to_route, select_backend, select_backends
 from gateway.policy.autoroute import select_auto_route
 from gateway.policy.auth import api_key_middleware, auth_status
 from gateway.tools.websearch import WebSearchClient, inject_grounding
@@ -981,83 +982,109 @@ async def chat_completions(request: ChatCompletionRequest, x_ai_privacy: Optiona
         log_routing_decision(route_name, request.model, privacy_level, "none", False, "blocked", "privacy_policy_violation", correlation_id=correlation_id)
         raise HTTPException(status_code=403, detail={"message": f"Privacy level {privacy_level} not allowed for route {route_name}", "type": "privacy_blocked", "code": "policy_violation"})
 
-    # 4. Select Backend
+    # 4. Select backends (primary first, then fallback) — retried at runtime below
     try:
-        backend_id = select_backend(route_config, backends_config)
+        candidates = select_backends(route_config, backends_config)
     except HTTPException as e:
         log_routing_decision(route_name, request.model, privacy_level, "none", False, "error", "no_backends_available", correlation_id=correlation_id)
         raise e
 
-    # Determine if fallback was used
     primary_id = route_config.get("primary")
-    fallback_used = backend_id != primary_id
 
-    # 5. Forward Request
-    provider = get_provider(backend_id, backends_config)
-    if not provider:
-        log_routing_decision(route_name, request.model, privacy_level, backend_id, fallback_used, "error", "provider_not_found", correlation_id=correlation_id)
-        raise HTTPException(status_code=500, detail={"message": f"Provider adapter not found for backend {backend_id}", "type": "config_error", "code": "internal_error"})
+    target_model_name = resolve_target_model(request.model, models_config)
 
-    target_model_name = request.model
-    if request.model in models_config.get("models", {}):
-        target_model_name = models_config["models"][request.model].get("model", request.model)
+    def build_headers(backend_id: str) -> dict:
+        h = {
+            "x-correlation-id": correlation_id,
+            "x-ai-route": route_name,
+            "x-ai-backend": backend_id,
+            "x-ai-model": target_model_name,
+            "x-ai-fallback-used": str(backend_id != primary_id).lower(),
+            "x-ai-policy": privacy_level,
+        }
+        if auto_reason:
+            h["x-ai-auto-reason"] = auto_reason
+        # Web grounding result for the client (sources ride a header so streaming is
+        # unaffected; the value is base64(JSON) to stay ASCII-safe for any title/URL).
+        if web_requested:
+            h["x-ai-grounding"] = grounding_status or "unknown"
+            if grounding_sources:
+                h["x-ai-grounded"] = "true"
+                h["x-ai-sources"] = base64.b64encode(
+                    json.dumps(grounding_sources).encode("utf-8")
+                ).decode("ascii")
+        return h
 
-    headers = {
-        "x-correlation-id": correlation_id,
-        "x-ai-route": route_name,
-        "x-ai-backend": backend_id,
-        "x-ai-model": target_model_name,
-        "x-ai-fallback-used": str(fallback_used).lower(),
-        "x-ai-policy": privacy_level
-    }
+    # 5. Forward — try each candidate; fall through on connection errors,
+    #    timeouts and 5xx. 4xx (bad request) is the caller's fault: don't retry.
+    last_error: Optional[Exception] = None
+    for idx, backend_id in enumerate(candidates):
+        fallback_used = backend_id != primary_id
+        provider = get_provider(backend_id, backends_config)
+        if not provider:
+            log_routing_decision(route_name, request.model, privacy_level, backend_id, fallback_used, "error", "provider_not_found", correlation_id=correlation_id)
+            last_error = RuntimeError(f"Provider adapter not found for backend {backend_id}")
+            continue
+        start_time = time.time()
 
-    if auto_reason:
-        headers["x-ai-auto-reason"] = auto_reason
-
-    # Web grounding result for the client (sources ride a header so streaming is
-    # unaffected; the value is base64(JSON) to stay ASCII-safe for any title/URL).
-    if web_requested:
-        headers["x-ai-grounding"] = grounding_status or "unknown"
-        if grounding_sources:
-            headers["x-ai-grounded"] = "true"
-            headers["x-ai-sources"] = base64.b64encode(
-                json.dumps(grounding_sources).encode("utf-8")
-            ).decode("ascii")
-
-    if request.stream:
-        async def stream_wrapper(gen):
-            start_time = time.time()
-            ttft = None
+        if request.stream:
+            gen = provider.chat_completions_stream(request, target_model_name)
             try:
-                async for chunk in gen:
-                    if ttft is None:
-                        ttft = int((time.time() - start_time) * 1000)
-                        log_llm_event(correlation_id, "provider.stream.first_token", f"First token received in {ttft}ms")
-                    yield chunk
-                latency_ms = int((time.time() - start_time) * 1000)
-                log_routing_decision(route_name, request.model, privacy_level, backend_id, fallback_used, "success", error=auto_reason, latency_ms=latency_ms, ttft_ms=ttft, stream=True, correlation_id=correlation_id)
-                log_llm_event(correlation_id, "request.complete", "Stream completed successfully", {"latency_ms": latency_ms})
+                # Pull the first chunk *before* committing to the response so a
+                # dead backend can still fail over to the next candidate.
+                first_chunk = await gen.__anext__()
+            except StopAsyncIteration:
+                first_chunk = None
             except Exception as e:
-                latency_ms = int((time.time() - start_time) * 1000)
-                log_routing_decision(route_name, request.model, privacy_level, backend_id, fallback_used, "error", str(e), latency_ms=latency_ms, ttft_ms=ttft, stream=True, correlation_id=correlation_id)
-                raise e
+                last_error = e
+                log_routing_decision(route_name, request.model, privacy_level, backend_id, fallback_used, "error", str(e), latency_ms=int((time.time() - start_time) * 1000), stream=True, correlation_id=correlation_id)
+                if not _is_retryable(e):
+                    break
+                continue
 
-        stream_gen = provider.chat_completions_stream(request, target_model_name)
-        return StreamingResponse(stream_wrapper(stream_gen), media_type="text/event-stream", headers=headers)
+            async def stream_wrapper(gen=gen, first_chunk=first_chunk, backend_id=backend_id,
+                                     fallback_used=fallback_used, start_time=start_time):
+                ttft = int((time.time() - start_time) * 1000)
+                log_llm_event(correlation_id, "provider.stream.first_token", f"First token received in {ttft}ms")
+                try:
+                    if first_chunk is not None:
+                        yield first_chunk
+                    async for chunk in gen:
+                        yield chunk
+                    latency_ms = int((time.time() - start_time) * 1000)
+                    log_routing_decision(route_name, request.model, privacy_level, backend_id, fallback_used, "success", error=auto_reason, latency_ms=latency_ms, ttft_ms=ttft, stream=True, correlation_id=correlation_id)
+                    log_llm_event(correlation_id, "request.complete", "Stream completed successfully", {"latency_ms": latency_ms})
+                except Exception as e:
+                    latency_ms = int((time.time() - start_time) * 1000)
+                    log_routing_decision(route_name, request.model, privacy_level, backend_id, fallback_used, "error", str(e), latency_ms=latency_ms, ttft_ms=ttft, stream=True, correlation_id=correlation_id)
+                    raise
 
-    log_llm_event(correlation_id, "router.selected", f"Selected backend {backend_id}", {"backend": backend_id})
-    start_time = time.time()
-    try:
-        response = await provider.chat_completions(request, target_model_name)
-    except Exception as e:
+            return StreamingResponse(stream_wrapper(), media_type="text/event-stream", headers=build_headers(backend_id))
+
+        log_llm_event(correlation_id, "router.selected", f"Selected backend {backend_id}", {"backend": backend_id})
+        try:
+            response = await provider.chat_completions(request, target_model_name)
+        except Exception as e:
+            last_error = e
+            log_routing_decision(route_name, request.model, privacy_level, backend_id, fallback_used, "error", str(e), latency_ms=int((time.time() - start_time) * 1000), correlation_id=correlation_id)
+            if not _is_retryable(e):
+                break
+            continue
+
         latency_ms = int((time.time() - start_time) * 1000)
-        log_routing_decision(route_name, request.model, privacy_level, backend_id, fallback_used, "error", str(e), latency_ms=latency_ms, correlation_id=correlation_id)
-        raise HTTPException(status_code=502, detail={"message": f"Backend {backend_id} failed: {str(e)}", "type": "backend_error", "code": "bad_gateway"})
+        log_routing_decision(route_name, request.model, privacy_level, backend_id, fallback_used, "success", error=auto_reason, latency_ms=latency_ms, correlation_id=correlation_id)
+        log_llm_event(correlation_id, "request.complete", "Request completed successfully", {"latency_ms": latency_ms})
+        return JSONResponse(content=response.model_dump(), headers=build_headers(backend_id))
 
-    latency_ms = int((time.time() - start_time) * 1000)
-    log_routing_decision(route_name, request.model, privacy_level, backend_id, fallback_used, "success", error=auto_reason, latency_ms=latency_ms, correlation_id=correlation_id)
-    log_llm_event(correlation_id, "request.complete", "Request completed successfully", {"latency_ms": latency_ms})
-    return JSONResponse(content=response.model_dump(), headers=headers)
+    if isinstance(last_error, RuntimeError) and "Provider adapter not found" in str(last_error):
+        raise HTTPException(status_code=500, detail={"message": str(last_error), "type": "config_error", "code": "internal_error"})
+    raise HTTPException(status_code=502, detail={"message": f"All backends failed (tried: {', '.join(candidates)}). Last error: {type(last_error).__name__}: {last_error}", "type": "backend_error", "code": "bad_gateway"})
+
+def _is_retryable(exc: Exception) -> bool:
+    """Connection problems, timeouts and upstream 5xx justify trying the fallback."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code >= 500
+    return isinstance(exc, (httpx.TransportError, OSError))
 
 class RouteTestRequest(BaseModel):
     route: str

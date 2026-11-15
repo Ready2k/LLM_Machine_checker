@@ -80,7 +80,7 @@ class OpenAICompatibleProvider(Provider):
         if request.max_tokens is not None:
             payload["max_tokens"] = request.max_tokens
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=5.0)) as client:
             async with client.stream("POST", url, json=payload) as resp:
                 resp.raise_for_status()
                 async for chunk in resp.aiter_bytes():
@@ -103,7 +103,7 @@ class OpenAICompatibleProvider(Provider):
         if request.max_tokens is not None:
             payload["max_tokens"] = request.max_tokens
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=5.0)) as client:
             resp = await client.post(url, json=payload)
             resp.raise_for_status()
             data = resp.json()
