@@ -32,6 +32,7 @@ from gateway.providers.base import BackendHealth, ModelInfo, ChatCompletionReque
 from gateway.providers.ollama import OllamaProvider
 from gateway.providers.lmstudio import LMStudioProvider
 from gateway.providers.openai_compatible import OpenAICompatibleProvider, close_client
+from gateway.providers.sse import UsageTap
 from gateway.policy.privacy import extract_privacy_level, is_privacy_allowed, can_fallback_to_cloud, is_web_search_allowed
 from gateway.policy.routing import resolve_model_to_route, select_backend, select_backends
 from gateway.policy.autoroute import select_auto_route
@@ -291,12 +292,16 @@ def get_provider(backend_id: str, backends_config: dict) -> Optional[Provider]:
     if not runtime or not endpoint:
         return None
     runtime = str(runtime).replace("_", "-").lower()  # accept openai_compatible / openai-compatible
+    role = b_config.get("role", "unknown")
+    # Ask for a usage chunk on streams so telemetry can record token counts. On by
+    # default for runtimes known to support it; opt in/out per backend with stream_usage.
+    stream_usage = bool(b_config.get("stream_usage", runtime in ("ollama", "lmstudio", "lm-studio")))
     if runtime == "ollama":
-        return OllamaProvider(backend_id, endpoint, role=b_config.get("role", "unknown"))
+        return OllamaProvider(backend_id, endpoint, role=role, stream_usage=stream_usage)
     elif runtime in ("lmstudio", "lm-studio"):
-        return LMStudioProvider(backend_id, endpoint, role=b_config.get("role", "unknown"))
+        return LMStudioProvider(backend_id, endpoint, role=role, stream_usage=stream_usage)
     elif runtime == "openai-compatible":
-        return OpenAICompatibleProvider(backend_id, endpoint, role=b_config.get("role", "unknown"))
+        return OpenAICompatibleProvider(backend_id, endpoint, role=role, stream_usage=stream_usage)
     return None
 
 
@@ -863,7 +868,17 @@ async def chat_completions(request: ChatCompletionRequest, x_ai_privacy: Optiona
         start_time = time.time()
 
         if request.stream:
-            gen = provider.chat_completions_stream(request, target_model_name)
+            tap = UsageTap(drop_usage_only=bool(getattr(provider, "injects_stream_usage", lambda r: False)(request)))
+            raw = provider.chat_completions_stream(request, target_model_name)
+
+            async def tapped(raw=raw, tap=tap):
+                async for chunk in raw:
+                    for out in tap.feed(chunk):
+                        yield out
+                for out in tap.flush():
+                    yield out
+
+            gen = tapped()
             try:
                 # Pull the first chunk *before* committing to the response so a
                 # dead backend can still fail over to the next candidate.
@@ -878,7 +893,7 @@ async def chat_completions(request: ChatCompletionRequest, x_ai_privacy: Optiona
                 continue
 
             async def stream_wrapper(gen=gen, first_chunk=first_chunk, backend_id=backend_id,
-                                     fallback_used=fallback_used, start_time=start_time):
+                                     fallback_used=fallback_used, start_time=start_time, tap=tap):
                 ttft = int((time.time() - start_time) * 1000)
                 log_llm_event(correlation_id, "provider.stream.first_token", f"First token received in {ttft}ms")
                 try:
@@ -887,7 +902,9 @@ async def chat_completions(request: ChatCompletionRequest, x_ai_privacy: Optiona
                     async for chunk in gen:
                         yield chunk
                     latency_ms = int((time.time() - start_time) * 1000)
-                    log_routing_decision(route_name, request.model, privacy_level, backend_id, fallback_used, "success", error=auto_reason, latency_ms=latency_ms, ttft_ms=ttft, stream=True, correlation_id=correlation_id)
+                    tin, tout = tap.tokens
+                    log_routing_decision(route_name, request.model, privacy_level, backend_id, fallback_used, "success", error=auto_reason, latency_ms=latency_ms, ttft_ms=ttft, stream=True, correlation_id=correlation_id,
+                                         tokens_in=tin, tokens_out=tout)
                     log_llm_event(correlation_id, "request.complete", "Stream completed successfully", {"latency_ms": latency_ms})
                 except Exception as e:
                     latency_ms = int((time.time() - start_time) * 1000)
