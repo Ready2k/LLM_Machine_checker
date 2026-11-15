@@ -14,6 +14,12 @@ security:
       - public
       - personal
 
+  # Request limits (see gateway/policy/limits.py). 0 disables a limit.
+  limits:
+    max_body_bytes: 20971520        # 413 above this (Content-Length based)
+    rate_limit_per_minute: 0        # per API key / client IP; loopback exempt
+    max_tokens_cap: 0               # clamp max_tokens on completions
+
 telemetry:
   enabled: true
   log_prompts: false

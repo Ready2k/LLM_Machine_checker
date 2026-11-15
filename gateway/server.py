@@ -37,6 +37,7 @@ from gateway.policy.privacy import extract_privacy_level, is_privacy_allowed, ca
 from gateway.policy.routing import resolve_model_to_route, select_backend, select_backends
 from gateway.policy.autoroute import select_auto_route
 from gateway.policy.auth import api_key_middleware, auth_status
+from gateway.policy.limits import limits_middleware, limits_config, clamp_max_tokens
 from gateway.tools.websearch import WebSearchClient, inject_grounding
 from gateway.telemetry.events import log_routing_decision, log_llm_event
 from gateway.telemetry.database import init_db, close_db, get_db
@@ -334,7 +335,8 @@ app = FastAPI(
 
 app.include_router(observability_router)
 app.include_router(chat_helpers_router)
-app.middleware("http")(api_key_middleware)
+app.middleware("http")(limits_middleware)
+app.middleware("http")(api_key_middleware)  # added last = outermost: runs first
 
 # Mount static files (CSS, JS, images)
 if STATIC_DIR.exists():
@@ -783,6 +785,11 @@ async def chat_completions(request: ChatCompletionRequest, x_ai_privacy: Optiona
     routes_config = routes_data.get("routes", {})
     security_config = load_security_config().get("security", {})
     backends_config = load_backends_config()
+
+    # 0. Optional cap on generated tokens (security.limits.max_tokens_cap)
+    capped = clamp_max_tokens(request.max_tokens, limits_config(security_config)["max_tokens_cap"])
+    if capped != request.max_tokens:
+        request = request.model_copy(update={"max_tokens": capped})
 
     # 1. Privacy
     privacy_level = extract_privacy_level(request.metadata, x_ai_privacy, security_config.get("default_privacy", "personal"))

@@ -13,6 +13,7 @@ committed config. Behaviour:
 """
 from __future__ import annotations
 
+import hashlib
 import hmac
 import logging
 import os
@@ -79,7 +80,9 @@ async def api_key_middleware(request: Request, call_next):
     client_host = request.client.host if request.client else ""
     if client_host in _LOOPBACK:
         return await call_next(request)
-    if key_is_valid(_extract_key(request)):
+    presented = _extract_key(request)
+    if key_is_valid(presented):
+        request.state.client_id = "key:" + hashlib.sha256(presented.encode()).hexdigest()[:12]
         return await call_next(request)
     return JSONResponse(
         status_code=401,
