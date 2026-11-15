@@ -44,7 +44,7 @@ A lightweight Python gateway and machine profiling system for hybrid local LLM r
 ## Security
 
 - **API keys:** with `GATEWAY_API_KEYS` set (comma-separated), requests to `/v1/*`, `/api/*` and the `/chat/*` helper endpoints from non-loopback clients need `Authorization: Bearer <key>` or `x-api-key`. Loopback is always trusted; the HTML pages, static files and `/api/health` stay open. Browsers are prompted for the key once and keep it in localStorage. If `require_api_key_for_lan` is true but no key is set, the gateway runs **open** and logs a warning.
-- **Agent secret:** set `AGENT_SECRET` (same value on the gateway and each node agent). Without it, the insecure built-in default is used.
+- **Agent secret:** set `AGENT_SECRET` (same value on the gateway and each node agent). Without it, the insecure built-in default is used and a warning is logged; set `AGENT_STRICT=1` on a node agent to make it refuse to start on the default.
 - **Cloud:** the `cloud-best` route is disabled unless explicitly configured.
 - **Prompts** are never logged; telemetry holds routing metadata only.
 
@@ -62,7 +62,8 @@ Configure `config/tools.yaml` (or `SEARXNG_URL`) to point at a SearXNG node with
 - `GET /chat/` - Mobile-friendly web chat UI (history + memory stored client-side).
 - `GET /api/backends/health` - Live health check of all configured inference nodes.
 - `GET /v1/models` - Lists available model aliases (`auto`, `web`, `local-fast`, `local-quality`, `private-docs`, ...).
-- `POST /v1/chat/completions` - OpenAI-compatible inference endpoint.
+- `POST /v1/chat/completions` - OpenAI-compatible inference endpoint. Besides `messages`, `temperature` and `max_tokens`, these are forwarded to the backend when sent: `response_format`, `tools`, `tool_choice`, `top_p`, `top_k`, `min_p`, `stop`, `seed`, `n`, penalties, `logit_bias`, `logprobs`, `stream_options`.
+- `POST /v1/embeddings` - Pass-through to the backend flagged `embeddings: true` in `backends.yaml` (defaults to `macbook-m4pro`).
 
 ## Documentation
 
