@@ -1,7 +1,38 @@
+import asyncio
 import time
 import httpx
 from typing import List, Optional
 from .base import Provider, BackendHealth, ModelInfo, ChatCompletionRequest, ChatCompletionResponse, PASSTHROUGH_PARAMS
+
+HEALTH_TIMEOUT = httpx.Timeout(2.0)
+CHAT_TIMEOUT = httpx.Timeout(60.0, connect=5.0)
+STREAM_TIMEOUT = httpx.Timeout(120.0, connect=5.0)
+
+# One pooled client per event loop, shared by every provider instance so that
+# keep-alive connections to the LAN nodes are reused across requests. (httpx
+# clients are bound to the loop they were first used on; production has a single
+# loop, tests spin up several, hence the per-loop check.) Keep-alive expiry stays
+# below typical server idle timeouts (uvicorn: 5s) to avoid reusing dead sockets.
+_shared: Optional[tuple] = None  # (loop, client)
+
+
+def get_client() -> httpx.AsyncClient:
+    global _shared
+    loop = asyncio.get_running_loop()
+    if _shared is None or _shared[0] is not loop or _shared[1].is_closed:
+        client = httpx.AsyncClient(limits=httpx.Limits(
+            max_connections=100, max_keepalive_connections=20, keepalive_expiry=4.0))
+        _shared = (loop, client)
+    return _shared[1]
+
+
+async def close_client() -> None:
+    """Close the pooled client (called from the app's shutdown)."""
+    global _shared
+    if _shared is not None:
+        client, _shared = _shared[1], None
+        await client.aclose()
+
 
 def build_payload(request: ChatCompletionRequest, mapped_model: str, stream: bool) -> dict:
     """Backend request body: the core fields plus any allow-listed passthrough params."""
@@ -20,94 +51,79 @@ def build_payload(request: ChatCompletionRequest, mapped_model: str, stream: boo
 
 
 class OpenAICompatibleProvider(Provider):
-    """Generic OpenAI-compatible provider."""
-    
+    """Generic OpenAI-compatible provider. Ollama and LM Studio subclass this and
+    only override how health/model discovery is probed."""
+
+    runtime_label = "openai-compatible"
+
     def __init__(self, backend_id: str, endpoint: str, role: str):
         super().__init__(backend_id, endpoint)
         self.role = role
         # Ensure endpoint doesn't have trailing slash
         self.endpoint = self.endpoint.rstrip("/")
 
+    # -- URLs ---------------------------------------------------------------
+
+    def _v1(self, path: str) -> str:
+        """URL under the OpenAI-style /v1 root, whether or not the endpoint includes /v1."""
+        base = self.endpoint if self.endpoint.endswith("/v1") else f"{self.endpoint}/v1"
+        return f"{base}/{path}"
+
+    def _health_url(self) -> str:
+        return self._v1("models")
+
+    def _parse_health_models(self, data: dict) -> List[str]:
+        return [m.get("id") for m in data.get("data", []) if m.get("id")]
+
+    # -- health / models ----------------------------------------------------
+
     async def health(self) -> BackendHealth:
         start_time = time.time()
         try:
-            # For OpenAI-compatible, /v1/models is a good health check
-            url = f"{self.endpoint}/v1/models"
-            if not self.endpoint.endswith("/v1") and "/v1" not in self.endpoint:
-                 # If the user didn't specify /v1 in endpoint
-                 url = f"{self.endpoint}/v1/models"
-            elif self.endpoint.endswith("/v1"):
-                 url = f"{self.endpoint}/models"
-                 
-            async with httpx.AsyncClient(timeout=2.0) as client:
-                resp = await client.get(url)
-                resp.raise_for_status()
-                
+            resp = await get_client().get(self._health_url(), timeout=HEALTH_TIMEOUT)
+            resp.raise_for_status()
             latency_ms = int((time.time() - start_time) * 1000)
-            data = resp.json()
-            models = [m.get("id") for m in data.get("data", []) if m.get("id")]
             return BackendHealth(
-                id=self.backend_id,
-                role=self.role,
-                runtime="openai-compatible",
-                endpoint=self.endpoint,
-                status="up",
-                latency_ms=latency_ms,
-                error=None,
-                models=models
+                id=self.backend_id, role=self.role, runtime=self.runtime_label,
+                endpoint=self.endpoint, status="up", latency_ms=latency_ms, error=None,
+                models=self._parse_health_models(resp.json()),
             )
         except Exception as e:
             return BackendHealth(
-                id=self.backend_id,
-                role=self.role,
-                runtime="openai-compatible",
-                endpoint=self.endpoint,
-                status="down",
-                latency_ms=None,
-                error=str(e)
+                id=self.backend_id, role=self.role, runtime=self.runtime_label,
+                endpoint=self.endpoint, status="down", latency_ms=None, error=str(e),
             )
 
     async def list_models(self) -> List[ModelInfo]:
-        url = f"{self.endpoint}/models" if self.endpoint.endswith("/v1") else f"{self.endpoint}/v1/models"
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            data = resp.json()
-            
-            models = []
-            for m in data.get("data", []):
-                models.append(ModelInfo(id=m.get("id")))
-            return models
+        resp = await get_client().get(self._v1("models"), timeout=httpx.Timeout(10.0, connect=5.0))
+        resp.raise_for_status()
+        return [ModelInfo(id=m.get("id")) for m in resp.json().get("data", [])]
+
+    # -- chat ---------------------------------------------------------------
+
+    def _chat_url(self, request: ChatCompletionRequest) -> str:
+        url = self._v1("chat/completions")
+        if request.metadata and request.metadata.get("correlation_id"):
+            url += f"?trace_id={request.metadata['correlation_id']}"
+        return url
 
     async def chat_completions_stream(self, request: ChatCompletionRequest, mapped_model: str):
-        url = f"{self.endpoint}/chat/completions" if self.endpoint.endswith("/v1") else f"{self.endpoint}/v1/chat/completions"
-        if request.metadata and request.metadata.get("correlation_id"):
-            url += f"?trace_id={request.metadata['correlation_id']}"
-        
         payload = build_payload(request, mapped_model, True)
-
-        async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=5.0)) as client:
-            async with client.stream("POST", url, json=payload) as resp:
-                resp.raise_for_status()
-                async for chunk in resp.aiter_bytes():
-                    yield chunk
+        async with get_client().stream("POST", self._chat_url(request), json=payload,
+                                       timeout=STREAM_TIMEOUT) as resp:
+            resp.raise_for_status()
+            async for chunk in resp.aiter_bytes():
+                yield chunk
 
     async def chat_completions(self, request: ChatCompletionRequest, mapped_model: str) -> ChatCompletionResponse:
-        url = f"{self.endpoint}/chat/completions" if self.endpoint.endswith("/v1") else f"{self.endpoint}/v1/chat/completions"
-        if request.metadata and request.metadata.get("correlation_id"):
-            url += f"?trace_id={request.metadata['correlation_id']}"
-        
         payload = build_payload(request, mapped_model, request.stream)
-
-        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=5.0)) as client:
-            resp = await client.post(url, json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-            
-            return ChatCompletionResponse(
-                id=data.get("id", "chatcmpl-unknown"),
-                created=data.get("created", int(time.time())),
-                model=mapped_model,
-                choices=data.get("choices", []),
-                usage=data.get("usage")
-            )
+        resp = await get_client().post(self._chat_url(request), json=payload, timeout=CHAT_TIMEOUT)
+        resp.raise_for_status()
+        data = resp.json()
+        return ChatCompletionResponse(
+            id=data.get("id", "chatcmpl-unknown"),
+            created=data.get("created", int(time.time())),
+            model=mapped_model,
+            choices=data.get("choices", []),
+            usage=data.get("usage"),
+        )

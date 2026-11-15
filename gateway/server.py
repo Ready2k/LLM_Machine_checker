@@ -31,7 +31,7 @@ import httpx
 from gateway.providers.base import BackendHealth, ModelInfo, ChatCompletionRequest, ChatCompletionResponse, Provider
 from gateway.providers.ollama import OllamaProvider
 from gateway.providers.lmstudio import LMStudioProvider
-from gateway.providers.openai_compatible import OpenAICompatibleProvider
+from gateway.providers.openai_compatible import OpenAICompatibleProvider, close_client
 from gateway.policy.privacy import extract_privacy_level, is_privacy_allowed, can_fallback_to_cloud, is_web_search_allowed
 from gateway.policy.routing import resolve_model_to_route, select_backend, select_backends
 from gateway.policy.autoroute import select_auto_route
@@ -316,6 +316,7 @@ async def lifespan(app: FastAPI):
     await init_db(PROJECT_ROOT)
     auth_status(load_security_config().get("security", {}), log=True)
     yield
+    await close_client()
     await close_db()
 
 app = FastAPI(
