@@ -7,7 +7,7 @@
   <meta name="theme-color" content="#0a0e1a">
   <title>Local AI Fabric — Command Center</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/css/style.css?v=1.2">
+  <link rel="stylesheet" href="/static/css/style.css?v=1.3">
 </head>
 <body>
 
@@ -103,6 +103,7 @@
             <div class="obs-tabs">
                 <button class="obs-tab active" data-obs-tab="traces">Traces</button>
                 <button class="obs-tab" data-obs-tab="overview">Overview</button>
+                <button class="obs-tab" data-obs-tab="router">Auto-Router</button>
                 <button class="obs-tab" data-obs-tab="logs">Logs</button>
                 <button class="obs-tab" data-obs-tab="audit">Audit Export</button>
             </div>
@@ -149,6 +150,57 @@
                         <div class="obs-detail-val text-danger" id="obs-stat-errors">-</div>
                     </div>
                 </div>
+            </div>
+            <div class="obs-tab-content" id="obs-tab-router">
+                <div class="obs-toolbar rt-toolbar">
+                    <div class="rt-windows" role="group" aria-label="Time window">
+                        <button class="btn btn-sm rt-win" data-win="1h">1h</button>
+                        <button class="btn btn-sm rt-win active" data-win="24h">24h</button>
+                        <button class="btn btn-sm rt-win" data-win="7d">7d</button>
+                    </div>
+                    <button id="rt-refresh" class="btn btn-sm">Refresh</button>
+                </div>
+                <div class="obs-stats-bar rt-chips" id="rt-chips"></div>
+                <div class="obs-table-wrapper">
+                    <table class="obs-table rt-table" id="rt-routes-table">
+                        <thead>
+                            <tr>
+                                <th>Route</th>
+                                <th>Share of auto</th>
+                                <th>Requests</th>
+                                <th>p50</th>
+                                <th>p95</th>
+                                <th>Tokens in / out</th>
+                                <th>Errors</th>
+                                <th>Avg conf</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td colspan="8" class="text-dim text-center">Open this tab to load routing stats.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="obs-toolbar rt-toolbar" style="margin-top: 1.25rem;">
+                    <strong>Recent auto decisions</strong>
+                    <label class="rt-check"><input type="checkbox" id="rt-candidates"> Low-confidence only (misroute candidates)</label>
+                </div>
+                <div class="obs-table-wrapper">
+                    <table class="obs-table rt-table" id="rt-decisions-table">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Route</th>
+                                <th>Conf</th>
+                                <th>Score / threshold</th>
+                                <th>Reason</th>
+                                <th>Latency</th>
+                                <th>Wrong?</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+                <p class="text-dim" style="margin-top: 0.75rem; font-size: 0.8rem;">Reports become regression tests with <span class="mono">./manage.sh feedback list</span> / <span class="mono">promote</span>. No prompt text is shown or stored from this view.</p>
             </div>
             <div class="obs-tab-content" id="obs-tab-logs">
                 <p class="text-dim">Provider log collection coming soon.</p>
@@ -217,5 +269,6 @@
 <script src="/static/auth.js"></script>
 <script src="/static/js/app.js"></script>
 <script src="/static/js/observability.js"></script>
+<script src="/static/js/router.js"></script>
 </body>
 </html>

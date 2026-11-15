@@ -166,6 +166,25 @@ def test_short_prompt_stays_fast():
 
 
 # ---------------------------------------------------------------------------
+# Misroutes reported from real usage
+# ---------------------------------------------------------------------------
+# Entries are appended between the markers by `scripts/autoroute_feedback.py
+# promote` (from the chat UI's "wrong route?" / the dashboard's Auto-Router tab).
+# A new entry fails until weights/vocabulary are tuned -- that is the point.
+
+FEEDBACK_CORPUS = [
+    # (prompt, expected_route)
+    # feedback-corpus-begin
+    # feedback-corpus-end
+]
+
+
+@pytest.mark.parametrize("text,expected", FEEDBACK_CORPUS)
+def test_reported_misroutes(text, expected):
+    assert route(text) == expected
+
+
+# ---------------------------------------------------------------------------
 # Privacy: header override
 # ---------------------------------------------------------------------------
 

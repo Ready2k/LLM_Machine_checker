@@ -59,6 +59,7 @@ from gateway.api_dashboard import (  # noqa: F401  (re-exported: tests and other
     _request_row_to_event,
 )
 from gateway.chat_helpers import router as chat_helpers_router
+from gateway.api_router import router as autoroute_api_router
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -213,6 +214,7 @@ app = FastAPI(
 app.include_router(observability_router)
 app.include_router(chat_helpers_router)
 app.include_router(dashboard_router)
+app.include_router(autoroute_api_router)
 app.middleware("http")(limits_middleware)
 app.middleware("http")(api_key_middleware)  # added last = outermost: runs first
 

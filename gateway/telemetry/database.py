@@ -8,6 +8,29 @@ logger = logging.getLogger(__name__)
 
 DB_PATH = Path("data/telemetry/observability.db")
 
+# Misroute reports for model:"auto" (gateway/api_router.py, scripts/autoroute_feedback.py).
+# prompt_text is NULL unless the reporter explicitly shared it; it is cleared again
+# once the entry is promoted to a test or dismissed.
+ROUTER_FEEDBACK_SCHEMA = """
+    CREATE TABLE IF NOT EXISTS router_feedback (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        correlation_id TEXT UNIQUE,
+        created_at TEXT,
+        actual_route TEXT,
+        desired_route TEXT,
+        stage TEXT,
+        score REAL,
+        threshold REAL,
+        confidence REAL,
+        reason TEXT,
+        signals TEXT,
+        prompt_hash TEXT,
+        prompt_text TEXT,
+        note TEXT,
+        status TEXT DEFAULT 'new'
+    )
+"""
+
 _db: Optional[aiosqlite.Connection] = None
 _write_queue: asyncio.Queue = asyncio.Queue()
 _writer_task: Optional[asyncio.Task] = None
@@ -53,7 +76,9 @@ async def init_db(app_root: Path):
             metadata TEXT
         )
     """)
+    await _db.execute(ROUTER_FEEDBACK_SCHEMA)
     # Add indexes
+    await _db.execute("CREATE INDEX IF NOT EXISTS idx_events_type_time ON llm_events(event_type, timestamp)")
     await _db.execute("CREATE INDEX IF NOT EXISTS idx_requests_time ON llm_requests(timestamp_start DESC)")
     await _db.execute("CREATE INDEX IF NOT EXISTS idx_requests_status ON llm_requests(status)")
     await _db.execute("CREATE INDEX IF NOT EXISTS idx_requests_backend ON llm_requests(backend)")

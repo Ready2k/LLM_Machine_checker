@@ -237,6 +237,13 @@ header { display: flex; align-items: center; gap: 10px;
   border: 1px solid var(--border); color: var(--dim);
   padding: 1px 7px; border-radius: 4px; }
 .badge .reason { font-style: italic; background: none; border: none; color: #555; padding: 0; }
+/* Auto-router feedback ("wrong route?") */
+.fb { display: inline-flex; flex-wrap: wrap; gap: 5px; align-items: center; font-size: 11px; color: var(--dim); }
+.fb-btn { font: inherit; font-size: 11px; color: var(--dim); background: none; cursor: pointer;
+  border: 1px dashed var(--border); border-radius: 4px; padding: 1px 7px; }
+.fb-btn:hover { color: var(--text); border-color: var(--accent); }
+.fb-share { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; }
+@media (hover: none) { .fb-btn { padding: 6px 10px; font-size: 12px; } }
 
 /* Typing dots */
 .dots { display: inline-flex; gap: 5px; padding: 6px 0; }

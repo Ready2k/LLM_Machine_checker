@@ -134,14 +134,79 @@ function appendMsg(role, contentHtml, routeInfo) {
   return bubble;
 }
 
-function makeBadge({ route, backend, model, reason }) {
+function makeBadge({ route, backend, model, reason, cid, msgId }) {
   const el = document.createElement('div');
   el.className = 'badge';
   if (route)   el.innerHTML += `<span>route: ${esc(route)}</span>`;
   if (backend) el.innerHTML += `<span>backend: ${esc(backend)}</span>`;
   if (model)   el.innerHTML += `<span>model: ${esc(model)}</span>`;
   if (reason)  el.innerHTML += `<span class="reason">↳ ${esc(reason)}</span>`;
+  // Auto-routed (has a reason) and traceable (has a correlation id): let the user flag a misroute.
+  if (reason && cid && route) el.appendChild(makeRouteFeedback({ route, reason, cid, msgId }));
   return el;
+}
+
+// ── Auto-router feedback ("wrong route?") ─────────────────────────────────
+// Posts to /api/router/feedback. The prompt text is sent only if the box stays
+// ticked; the gateway keeps it just until the report becomes a test (or is dismissed).
+const FB_CHOICES = [['fast', 'local-fast'], ['quality', 'local-quality'], ['private', 'private-docs']];
+const FB_SHARE_KEY = 'router_feedback_share_prompt';
+
+function promptFor(msgId) {
+  const i = state.messages.findIndex(m => m.id === msgId);
+  for (let j = i - 1; j >= 0; j--) if (state.messages[j].role === 'user') return state.messages[j].content || '';
+  return '';
+}
+
+function makeRouteFeedback({ route, reason, cid, msgId }) {
+  const box = document.createElement('span');
+  box.className = 'fb';
+  const open = document.createElement('button');
+  open.type = 'button';
+  open.className = 'fb-btn';
+  open.textContent = 'wrong route?';
+  box.appendChild(open);
+
+  open.addEventListener('click', () => {
+    box.replaceChildren();
+    box.append('should be: ');
+    let share = true;
+    try { share = localStorage.getItem(FB_SHARE_KEY) !== '0'; } catch { /* default on */ }
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = share;
+    for (const [key, name] of FB_CHOICES) {
+      if (name === route) continue;
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'fb-btn';
+      b.textContent = key;
+      b.addEventListener('click', async () => {
+        try { localStorage.setItem(FB_SHARE_KEY, cb.checked ? '1' : '0'); } catch { /* ignore */ }
+        const body = { correlation_id: cid, desired: key, actual_route: route, reason };
+        if (cb.checked && key !== 'private') body.prompt = promptFor(msgId) || undefined;
+        try {
+          const r = await fetch('/api/router/feedback', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+          });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(typeof d.detail === 'string' ? d.detail : r.statusText);
+          box.textContent = `reported: should be ${d.desired_route}`;
+          toast(d.prompt_stored ? 'Thanks — reported with your prompt as a test candidate.'
+                                : 'Thanks — reported (prompt not stored).');
+        } catch (e) {
+          toast(`Could not send feedback: ${e.message}`);
+        }
+      });
+      box.appendChild(b);
+    }
+    const lab = document.createElement('label');
+    lab.className = 'fb-share';
+    lab.title = 'Send this prompt to the gateway so it can become a routing test. Never stored for private.';
+    lab.append(cb, ' include prompt');
+    box.appendChild(lab);
+  });
+  return box;
 }
 
 // Decode the base64(JSON) x-ai-sources header (UTF-8 safe).
@@ -197,7 +262,8 @@ function renderStored(m) {
     bubble.innerHTML = renderMd(m.content || '') + (interrupted ? INTERRUPTED_HTML : '');
     wrap.appendChild(bubble);
     if (m.route || m.backend || m.model) {
-      wrap.appendChild(makeBadge({ route: m.route, backend: m.backend, model: m.model }));
+      wrap.appendChild(makeBadge({ route: m.route, backend: m.backend, model: m.model,
+                                   reason: m.reason, cid: m.cid, msgId: m.id }));
     }
     renderSources(wrap, m.sources);
     $msgs.appendChild(wrap);
@@ -457,6 +523,8 @@ async function send() {
       backend: resp.headers.get('x-ai-backend'),
       model:   resp.headers.get('x-ai-model'),
       reason:  resp.headers.get('x-ai-auto-reason'),
+      cid:     resp.headers.get('x-correlation-id'),
+      msgId:   aMsg.id,
     };
     // Web grounding result (sources ride a response header so streaming is unaffected).
     aMsg.sources = decodeSources(resp.headers.get('x-ai-sources'));
@@ -516,6 +584,7 @@ async function send() {
     aMsg.route = routeInfo.route;
     aMsg.backend = routeInfo.backend;
     aMsg.model = routeInfo.model;
+    if (routeInfo.reason) { aMsg.reason = routeInfo.reason; aMsg.cid = routeInfo.cid; }
     if (routeInfo.route || routeInfo.backend) wrap.appendChild(makeBadge(routeInfo));
     renderSources(wrap, aMsg.sources);
     if (routeInfo.route) state.conv.lastRoute = routeInfo.route;

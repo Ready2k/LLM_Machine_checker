@@ -65,7 +65,28 @@ Configure `config/tools.yaml` (or `SEARXNG_URL`) to point at a SearXNG node with
 
 A reason looks like `score=4.5>=3 conf=0.88: depth_strong+2 code_task+1.5 code_block+1`. It names signals and weights only, never prompt text, and is also logged as a `router.auto` trace event.
 
-Tune it in `config/autoroute.yaml` (optional; applies without a restart): threshold, per-signal weights, extra terms per vocabulary tier, route names. `llm_tiebreak` (off by default) asks the `local-fast` model for a one-word SIMPLE/COMPLEX verdict on close calls; it never runs for private decisions and any failure keeps the rule-based answer. When a prompt is misrouted, add it to the corpus in `tests/test_autoroute.py` and adjust until the file passes.
+Tune it in `config/autoroute.yaml` (optional; applies without a restart): threshold, per-signal weights, extra terms per vocabulary tier, route names. `llm_tiebreak` (off by default) asks the `local-fast` model for a one-word SIMPLE/COMPLEX verdict on close calls; it never runs for private decisions and any failure keeps the rule-based answer. When a prompt is misrouted, report it and promote it to a test (below), then adjust until the file passes.
+
+#### Feedback loop: misroute → regression test
+
+1. **Report it.** In the chat UI, click **wrong route?** under an auto-routed answer and pick what it should have been. In the dashboard, use the **Auto-Router** tab's *should be…* menu on any recent decision. Or call the API with the `x-correlation-id` from the response:
+   ```bash
+   curl -X POST http://127.0.0.1:8080/api/router/feedback -H 'Content-Type: application/json' \
+     -d '{"correlation_id": "<x-correlation-id>", "desired": "quality", "note": "needed depth", "prompt": "<optional: the user message>"}'
+   ```
+2. **Review.** `./manage.sh feedback list` (on the gateway host).
+3. **Promote.** `./manage.sh feedback promote 3 7` (or `--all`) appends `(prompt, EXPECTED_ROUTE)` to `FEEDBACK_CORPUS` in `tests/test_autoroute.py`. Reports with no stored prompt need `--text "<representative prompt>"`. `./manage.sh feedback dismiss 5` drops one.
+4. **Tune.** `pytest tests/test_autoroute.py` — the new case fails until you adjust `config/autoroute.yaml` (mirror the change in `DEFAULTS`) or the vocabulary in `gateway/policy/autoroute.py`.
+
+What is stored: the decision trace (signal names/weights), a truncated SHA-256 of the prompt, and the routes. The prompt **text** is kept only if the reporter sends it (chat UI checkbox, on by default), `telemetry.feedback_store_prompts` isn't `false`, and neither route is the private one; it is deleted on promote/dismiss and never returned by the API. Reporting never changes live routing — only the tests and your tuning do.
+
+#### Routing observability
+
+The dashboard's **Auto-Router** tab (and the API behind it) shows how `auto` traffic actually behaves:
+
+- `GET /api/router/stats` — per window (`1h`, `24h`, `7d`): share of auto requests per route, request count, p50/p95 latency and TTFT, token volume, errors, average confidence, low-confidence count, plus pending/promoted report counts.
+- `GET /api/router/decisions?limit=50` — recent decisions with reason, score/threshold, confidence and latency; `candidates=true` (optionally `max_confidence=0.65`) keeps only close calls — likely misroutes.
+- `GET /api/router/feedback?status=new|promoted|dismissed|all` — reports (no prompt text).
 
 ## Configuration
 

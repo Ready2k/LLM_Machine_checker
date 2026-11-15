@@ -130,8 +130,17 @@ case "$1" in
     test)
         test_services
         ;;
+    feedback)
+        # Auto-router misroute reports -> regression tests (list | promote | dismiss)
+        shift
+        if [ -d ".venv" ]; then
+            .venv/bin/python scripts/autoroute_feedback.py "$@"
+        else
+            python3 scripts/autoroute_feedback.py "$@"
+        fi
+        ;;
     *)
-        echo "Usage: $0 {start|stop|restart|test}"
+        echo "Usage: $0 {start|stop|restart|test|feedback <list|promote|dismiss> ...}"
         exit 1
         ;;
 esac
